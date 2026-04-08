@@ -110,6 +110,24 @@ class TokenExpiredError(AuthenticationError):
         super().__init__(message)
 
 
+class TokenRefreshError(AuthenticationError):
+    """Failed to refresh access token."""
+
+    def __init__(
+        self,
+        ctid_trader_account_id: int | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        self.ctid_trader_account_id = ctid_trader_account_id
+        self.cause = cause
+        message = "Failed to refresh access token"
+        if ctid_trader_account_id:
+            message += f" for account {ctid_trader_account_id}"
+        if cause:
+            message += f": {cause}"
+        super().__init__(message)
+
+
 # =============================================================================
 # API Errors
 # =============================================================================
