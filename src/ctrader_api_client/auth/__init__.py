@@ -4,8 +4,8 @@ This module provides application and account authentication,
 with automatic token refresh management.
 """
 
-from ctrader_api_client.auth.credentials import AccountCredentials
-from ctrader_api_client.auth.manager import AuthManager
+from .credentials import AccountCredentials
+from .manager import AuthManager
 
 
 __all__ = [

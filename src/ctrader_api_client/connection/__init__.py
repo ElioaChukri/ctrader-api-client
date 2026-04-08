@@ -4,9 +4,9 @@ This module provides TCP/SSL transport, message protocol handling,
 and heartbeat management for maintaining connections to cTrader servers.
 """
 
-from ctrader_api_client.connection.heartbeat import HeartbeatManager
-from ctrader_api_client.connection.protocol import Protocol
-from ctrader_api_client.connection.transport import Transport
+from .heartbeat import HeartbeatManager
+from .protocol import Protocol
+from .transport import Transport
 
 
 __all__ = [
