@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ctrader_api_client.enums import ExecutionType, OrderSide
 from ctrader_api_client.events.emitter import EventEmitter
 from ctrader_api_client.events.router import EventRouter
 from ctrader_api_client.events.types import (
@@ -13,11 +14,9 @@ from ctrader_api_client.events.types import (
     ClientDisconnectEvent,
     DepthEvent,
     ExecutionEvent,
-    ExecutionType,
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    OrderSide,
     PnLChangeEvent,
     SpotEvent,
     SymbolChangedEvent,

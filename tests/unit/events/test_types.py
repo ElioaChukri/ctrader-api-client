@@ -5,17 +5,16 @@ from decimal import Decimal
 
 import pytest
 
+from ctrader_api_client.enums import ExecutionType, OrderSide
 from ctrader_api_client.events.types import (
     AccountDisconnectEvent,
     ClientDisconnectEvent,
     DepthEvent,
     DepthQuote,
     ExecutionEvent,
-    ExecutionType,
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    OrderSide,
     PnLChangeEvent,
     SpotEvent,
     SymbolChangedEvent,

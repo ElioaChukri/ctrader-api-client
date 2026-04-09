@@ -8,30 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
 
-
-class ExecutionType(Enum):
-    """Type of execution event."""
-
-    ORDER_ACCEPTED = "ORDER_ACCEPTED"
-    ORDER_FILLED = "ORDER_FILLED"
-    ORDER_REPLACED = "ORDER_REPLACED"
-    ORDER_CANCELLED = "ORDER_CANCELLED"
-    ORDER_EXPIRED = "ORDER_EXPIRED"
-    ORDER_REJECTED = "ORDER_REJECTED"
-    ORDER_CANCEL_REJECTED = "ORDER_CANCEL_REJECTED"
-    ORDER_PARTIAL_FILL = "ORDER_PARTIAL_FILL"
-    SWAP = "SWAP"
-    DEPOSIT_WITHDRAW = "DEPOSIT_WITHDRAW"
-    BONUS_DEPOSIT_WITHDRAW = "BONUS_DEPOSIT_WITHDRAW"
-
-
-class OrderSide(Enum):
-    """Order side."""
-
-    BUY = "BUY"
-    SELL = "SELL"
+from ..enums import ExecutionType, OrderSide
 
 
 @dataclass(frozen=True, slots=True)

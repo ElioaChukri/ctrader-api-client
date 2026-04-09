@@ -20,6 +20,7 @@ from .._internal.proto import (
     ProtoOATrailingSLChangedEvent,
     ProtoOAv1PnLChangeEvent,
 )
+from ..enums import ExecutionType, OrderSide
 from .emitter import EventEmitter
 from .types import (
     AccountDisconnectEvent,
@@ -27,11 +28,9 @@ from .types import (
     DepthEvent,
     DepthQuote,
     ExecutionEvent,
-    ExecutionType,
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    OrderSide,
     PnLChangeEvent,
     SpotEvent,
     SymbolChangedEvent,
