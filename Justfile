@@ -10,6 +10,22 @@ default: help
 help:
     just --list
 
+# Lint the codebase using ruff, optionally specifying a directory to lint.
+lint directory='':
+    uv run ruff check --fix {{directory}}
+
+# Format the codebase using ruff, optionally specifying a directory to format.
+fmt directory='':
+    uv run ruff format {{directory}}
+
+# Run type checking using ty, optionally specifying a directory to check.
+type-check directory='':
+    uv run ty check {{directory}}
+
+# Run tests using pytest, optionally specifying a directory to test.
+test directory='':
+    uv run pytest {{directory}}
+
 # Update .proto files to a specific version. Defaults to 'main' if no version is provided.
 update-proto version='':
     ./protos/update.sh {{version}}
