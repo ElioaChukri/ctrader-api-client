@@ -10,6 +10,12 @@ default: help
 help:
     just --list
 
+# Run all CI steps: linting, formatting, type checking
+ci directory='':
+    @just lint {{directory}}
+    @just fmt {{directory}}
+    @just type-check {{directory}}
+
 # Lint the codebase using ruff, optionally specifying a directory to lint.
 lint directory='':
     uv run ruff check --fix {{directory}}
