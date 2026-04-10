@@ -50,6 +50,9 @@ select = [
     "RUF022", # Unsorted __all__ blocks
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E741"]
+
 [tool.ruff.lint.isort]
 combine-as-imports = true
 force-single-line = false
