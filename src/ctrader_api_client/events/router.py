@@ -11,6 +11,7 @@ from .._internal.proto import (
     ProtoOAClientDisconnectEvent,
     ProtoOADepthEvent,
     ProtoOAExecutionEvent,
+    ProtoOAExecutionType,
     ProtoOAMarginCallTriggerEvent,
     ProtoOAMarginChangedEvent,
     ProtoOAOrderErrorEvent,
@@ -49,17 +50,17 @@ logger = logging.getLogger(__name__)
 
 # Map ProtoOAExecutionType enum values to our ExecutionType
 _EXECUTION_TYPE_MAP: dict[int, ExecutionType] = {
-    2: ExecutionType.ORDER_ACCEPTED,
-    3: ExecutionType.ORDER_FILLED,
-    4: ExecutionType.ORDER_REPLACED,
-    5: ExecutionType.ORDER_CANCELLED,
-    6: ExecutionType.ORDER_EXPIRED,
-    7: ExecutionType.ORDER_REJECTED,
-    8: ExecutionType.ORDER_CANCEL_REJECTED,
-    9: ExecutionType.SWAP,
-    10: ExecutionType.DEPOSIT_WITHDRAW,
-    11: ExecutionType.ORDER_PARTIAL_FILL,
-    12: ExecutionType.BONUS_DEPOSIT_WITHDRAW,
+    ProtoOAExecutionType.ORDER_ACCEPTED: ExecutionType.ORDER_ACCEPTED,
+    ProtoOAExecutionType.ORDER_FILLED: ExecutionType.ORDER_FILLED,
+    ProtoOAExecutionType.ORDER_REPLACED: ExecutionType.ORDER_REPLACED,
+    ProtoOAExecutionType.ORDER_CANCELLED: ExecutionType.ORDER_CANCELLED,
+    ProtoOAExecutionType.ORDER_EXPIRED: ExecutionType.ORDER_EXPIRED,
+    ProtoOAExecutionType.ORDER_REJECTED: ExecutionType.ORDER_REJECTED,
+    ProtoOAExecutionType.ORDER_CANCEL_REJECTED: ExecutionType.ORDER_CANCEL_REJECTED,
+    ProtoOAExecutionType.SWAP: ExecutionType.SWAP,
+    ProtoOAExecutionType.DEPOSIT_WITHDRAW: ExecutionType.DEPOSIT_WITHDRAW,
+    ProtoOAExecutionType.ORDER_PARTIAL_FILL: ExecutionType.ORDER_PARTIAL_FILL,
+    ProtoOAExecutionType.BONUS_DEPOSIT_WITHDRAW: ExecutionType.BONUS_DEPOSIT_WITHDRAW,
 }
 
 
