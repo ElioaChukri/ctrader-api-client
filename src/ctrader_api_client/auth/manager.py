@@ -18,13 +18,17 @@ from .._internal.proto import (
     ProtoOAAccountAuthRes,
     ProtoOAApplicationAuthReq,
     ProtoOAApplicationAuthRes,
+    ProtoOAGetAccountListByAccessTokenReq,
+    ProtoOAGetAccountListByAccessTokenRes,
     ProtoOARefreshTokenReq,
     ProtoOARefreshTokenRes,
 )
 from ..exceptions import (
+    AccountNotFoundError,
     APIError,
     TokenRefreshError,
 )
+from ..models import AccountSummary
 from .credentials import AccountCredentials
 
 
@@ -213,6 +217,129 @@ class AuthManager:
         self._accounts[credentials.account_id] = credentials
         logger.info("Account %d authenticated successfully", credentials.account_id)
         return response
+
+    async def get_accounts(
+        self,
+        access_token: str,
+        timeout: float = 30.0,
+    ) -> list[AccountSummary]:
+        """Get all trading accounts associated with an access token.
+
+        This retrieves the list of accounts without authenticating them.
+        Useful for discovering available accounts or letting users select
+        which account to use.
+
+        Args:
+            access_token: OAuth access token.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            List of account summaries (lightweight account info).
+
+        Raises:
+            APIError: If the request fails.
+            CTraderConnectionTimeoutError: If request times out.
+        """
+        logger.debug("Fetching accounts for access token")
+
+        request = ProtoOAGetAccountListByAccessTokenReq(
+            access_token=access_token,
+        )
+
+        response = await self._protocol.send_request(request, timeout=timeout)
+
+        if not isinstance(response, ProtoOAGetAccountListByAccessTokenRes):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected ProtoOAGetAccountListByAccessTokenRes, got {type(response).__name__}",
+            )
+
+        accounts = [AccountSummary.from_proto(acc) for acc in response.ctid_trader_account]
+        logger.debug("Found %d accounts", len(accounts))
+        return accounts
+
+    async def resolve_account_id(
+        self,
+        access_token: str,
+        trader_login: int,
+        timeout: float = 30.0,
+    ) -> int:
+        """Resolve a trader login to its cTID trader account ID.
+
+        Args:
+            access_token: OAuth access token.
+            trader_login: The trader login number (visible in cTrader app).
+            timeout: Request timeout in seconds.
+
+        Returns:
+            The cTID trader account ID (used for API calls).
+
+        Raises:
+            AccountNotFoundError: If no account matches the trader login.
+            APIError: If the request fails.
+            CTraderConnectionTimeoutError: If request times out.
+        """
+        accounts = await self.get_accounts(access_token, timeout=timeout)
+
+        for account in accounts:
+            if account.trader_login == trader_login:
+                logger.debug(
+                    "Resolved trader login %d to account ID %d",
+                    trader_login,
+                    account.account_id,
+                )
+                return account.account_id
+
+        available_logins = [acc.trader_login for acc in accounts]
+        raise AccountNotFoundError(trader_login, available_logins)
+
+    async def authenticate_by_trader_login(
+        self,
+        trader_login: int,
+        access_token: str,
+        refresh_token: str,
+        expires_at: float,
+        timeout: float = 30.0,
+    ) -> AccountCredentials:
+        """Authenticate an account using trader login (discovers cTID automatically).
+
+        This is a convenience method that:
+        1. Resolves the trader login to the cTID trader account ID
+        2. Creates AccountCredentials with the resolved ID
+        3. Authenticates the account
+
+        Args:
+            trader_login: The trader login number (visible in cTrader app).
+            access_token: OAuth access token.
+            refresh_token: OAuth refresh token.
+            expires_at: Unix timestamp when access token expires.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            AccountCredentials with the resolved account_id, ready for use.
+
+        Raises:
+            AccountNotFoundError: If no account matches the trader login.
+            APIError: If authentication fails.
+            CTraderConnectionTimeoutError: If request times out.
+        """
+        logger.info("Authenticating by trader login %d", trader_login)
+
+        # Resolve trader_login to account_id
+        account_id = await self.resolve_account_id(access_token, trader_login, timeout=timeout)
+
+        # Create credentials with resolved ID
+        credentials = AccountCredentials(
+            account_id=account_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+        )
+
+        # Authenticate the account
+        await self.authenticate_account(credentials, timeout=timeout)
+
+        return credentials
 
     def remove_account(self, account_id: int) -> bool:
         """Remove an account from refresh monitoring.

@@ -11,13 +11,15 @@ import pytest
 from ctrader_api_client._internal.proto import (
     ProtoOAAccountAuthRes,
     ProtoOAApplicationAuthRes,
+    ProtoOACtidTraderAccount,
+    ProtoOAGetAccountListByAccessTokenRes,
     ProtoOARefreshTokenReq,
     ProtoOARefreshTokenRes,
 )
 from ctrader_api_client.auth.credentials import AccountCredentials
 from ctrader_api_client.auth.manager import AuthManager
 from ctrader_api_client.connection.protocol import Protocol
-from ctrader_api_client.exceptions import APIError, TokenRefreshError
+from ctrader_api_client.exceptions import AccountNotFoundError, APIError, TokenRefreshError
 
 
 @pytest.fixture
@@ -520,3 +522,254 @@ class TestRefreshLoop:
         assert unchanged_creds is not None
         assert unchanged_creds.access_token == "token"
         assert unchanged_creds.refresh_token == "refresh"
+
+
+class TestGetAccounts:
+    """Tests for AuthManager.get_accounts()."""
+
+    @pytest.mark.anyio
+    async def test_returns_account_summaries(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(
+            ctid_trader_account=[
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=123,
+                    is_live=True,
+                    trader_login=17091452,
+                    broker_title_short="TestBroker",
+                ),
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=456,
+                    is_live=False,
+                    trader_login=17091453,
+                    broker_title_short="TestBroker",
+                ),
+            ]
+        )
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        accounts = await auth.get_accounts("my_access_token")
+
+        assert len(accounts) == 2
+        assert accounts[0].account_id == 123
+        assert accounts[0].trader_login == 17091452
+        assert accounts[0].is_live is True
+        assert accounts[1].account_id == 456
+        assert accounts[1].trader_login == 17091453
+        assert accounts[1].is_live is False
+
+    @pytest.mark.anyio
+    async def test_sends_correct_request(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(ctid_trader_account=[])
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        await auth.get_accounts("my_secret_token")
+
+        mock_protocol.send_request.assert_called_once()
+        request = mock_protocol.send_request.call_args[0][0]
+        assert request.access_token == "my_secret_token"
+
+    @pytest.mark.anyio
+    async def test_returns_empty_list_when_no_accounts(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(ctid_trader_account=[])
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        accounts = await auth.get_accounts("token")
+
+        assert accounts == []
+
+
+class TestResolveAccountId:
+    """Tests for AuthManager.resolve_account_id()."""
+
+    @pytest.mark.anyio
+    async def test_finds_matching_account(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(
+            ctid_trader_account=[
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=111,
+                    is_live=True,
+                    trader_login=1001,
+                ),
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=222,
+                    is_live=True,
+                    trader_login=1002,
+                ),
+            ]
+        )
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        account_id = await auth.resolve_account_id("token", trader_login=1002)
+
+        assert account_id == 222
+
+    @pytest.mark.anyio
+    async def test_raises_when_not_found(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(
+            ctid_trader_account=[
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=111,
+                    is_live=True,
+                    trader_login=1001,
+                ),
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=222,
+                    is_live=True,
+                    trader_login=1002,
+                ),
+            ]
+        )
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        with pytest.raises(AccountNotFoundError) as exc_info:
+            await auth.resolve_account_id("token", trader_login=9999)
+
+        assert exc_info.value.trader_login == 9999
+        assert exc_info.value.available_logins == [1001, 1002]
+
+    @pytest.mark.anyio
+    async def test_raises_with_empty_list(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(ctid_trader_account=[])
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        with pytest.raises(AccountNotFoundError) as exc_info:
+            await auth.resolve_account_id("token", trader_login=123)
+
+        assert exc_info.value.available_logins == []
+
+
+class TestAuthenticateByTraderLogin:
+    """Tests for AuthManager.authenticate_by_trader_login()."""
+
+    @pytest.mark.anyio
+    async def test_resolves_and_authenticates(self, mock_protocol: MagicMock) -> None:
+        # First call: get accounts
+        # Second call: authenticate account
+        mock_protocol.send_request.side_effect = [
+            ProtoOAGetAccountListByAccessTokenRes(
+                ctid_trader_account=[
+                    ProtoOACtidTraderAccount(
+                        ctid_trader_account_id=12345,
+                        is_live=True,
+                        trader_login=17091452,
+                    ),
+                ]
+            ),
+            ProtoOAAccountAuthRes(ctid_trader_account_id=12345),
+        ]
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        creds = await auth.authenticate_by_trader_login(
+            trader_login=17091452,
+            access_token="access_token_123",
+            refresh_token="refresh_token_456",
+            expires_at=1778617423,
+        )
+
+        # Verify credentials are correct
+        assert creds.account_id == 12345
+        assert creds.access_token == "access_token_123"
+        assert creds.refresh_token == "refresh_token_456"
+        assert creds.expires_at == 1778617423
+
+        # Verify account is authenticated and stored
+        assert 12345 in auth.authenticated_accounts
+        assert auth.get_credentials(12345) is creds
+
+    @pytest.mark.anyio
+    async def test_raises_when_account_not_found(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.return_value = ProtoOAGetAccountListByAccessTokenRes(
+            ctid_trader_account=[
+                ProtoOACtidTraderAccount(
+                    ctid_trader_account_id=111,
+                    is_live=True,
+                    trader_login=1001,
+                ),
+            ]
+        )
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        with pytest.raises(AccountNotFoundError):
+            await auth.authenticate_by_trader_login(
+                trader_login=9999,
+                access_token="token",
+                refresh_token="refresh",
+                expires_at=time.time() + 3600,
+            )
+
+        # Should not have authenticated anything
+        assert auth.authenticated_accounts == []
+
+    @pytest.mark.anyio
+    async def test_calls_with_correct_timeout(self, mock_protocol: MagicMock) -> None:
+        mock_protocol.send_request.side_effect = [
+            ProtoOAGetAccountListByAccessTokenRes(
+                ctid_trader_account=[
+                    ProtoOACtidTraderAccount(
+                        ctid_trader_account_id=100,
+                        is_live=True,
+                        trader_login=5000,
+                    ),
+                ]
+            ),
+            ProtoOAAccountAuthRes(ctid_trader_account_id=100),
+        ]
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+        )
+
+        await auth.authenticate_by_trader_login(
+            trader_login=5000,
+            access_token="token",
+            refresh_token="refresh",
+            expires_at=time.time() + 3600,
+            timeout=45.0,
+        )
+
+        # Both calls should use the custom timeout
+        assert mock_protocol.send_request.call_count == 2
+        for call in mock_protocol.send_request.call_args_list:
+            assert call[1]["timeout"] == 45.0

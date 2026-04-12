@@ -128,6 +128,22 @@ class TokenRefreshError(AuthenticationError):
         super().__init__(message)
 
 
+class AccountNotFoundError(AuthenticationError):
+    """No account found matching the given criteria."""
+
+    def __init__(
+        self,
+        trader_login: int,
+        available_logins: list[int] | None = None,
+    ) -> None:
+        self.trader_login = trader_login
+        self.available_logins = available_logins
+        message = f"No account found with trader login {trader_login}"
+        if available_logins:
+            message += f". Available logins: {available_logins}"
+        super().__init__(message)
+
+
 # =============================================================================
 # API Errors
 # =============================================================================
