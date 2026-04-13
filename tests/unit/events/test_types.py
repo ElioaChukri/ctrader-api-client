@@ -55,7 +55,7 @@ class TestSpotEvent:
         )
 
         with pytest.raises(AttributeError):
-            event.bid = 124000  # ty: ignore[invalid-assignment]
+            event.bid = 124000
 
     def test_spot_event_with_none_values(self) -> None:
         """Test SpotEvent with None bid/ask."""
