@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from .._internal.proto import (
     ProtoOACancelOrderReq,
+    ProtoOADealListByPositionIdReq,
+    ProtoOADealListByPositionIdRes,
     ProtoOADealListReq,
     ProtoOADealListRes,
     ProtoOAExecutionEvent,
@@ -421,6 +423,42 @@ class TradingAPI:
             )
 
         return [Order.from_proto(o) for o in response.order]
+
+    async def get_deals_by_position_id(
+        self,
+        account_id: int,
+        position_id: int,
+    ) -> list[Deal]:
+        """Get all deals for a specific position.
+
+        Args:
+            account_id: The cTID trader account ID.
+            position_id: The position ID to filter deals by.
+
+        Returns:
+            List of Deal objects associated with the position.
+
+        Raises:
+            APIError: If request fails.
+            CTraderConnectionTimeoutError: If request times out.
+        """
+        request = ProtoOADealListByPositionIdReq(
+            ctid_trader_account_id=account_id,
+            position_id=position_id,
+        )
+
+        response = await self._protocol.send_request(
+            request,
+            timeout=self._default_timeout,
+        )
+
+        if not isinstance(response, ProtoOADealListByPositionIdRes):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected ProtoOADealListRes, got {type(response).__name__}",
+            )
+
+        return [Deal.from_proto(d) for d in response.deal]
 
     async def get_deals(
         self,

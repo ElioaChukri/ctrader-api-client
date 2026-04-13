@@ -197,7 +197,10 @@ class Deal(FrozenModel):
     @property
     def is_closing_deal(self) -> bool:
         """Whether this deal closed (or partially closed) a position."""
-        return self.close_detail is not None
+        if self.close_detail is not None:
+            return self.close_detail.balance > 0
+        else:
+            return False
 
     @classmethod
     def from_proto(cls, proto: ProtoOADeal) -> Deal:
