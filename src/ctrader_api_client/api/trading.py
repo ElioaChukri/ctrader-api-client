@@ -10,6 +10,7 @@ from .._internal.proto import (
     ProtoOADealListRes,
     ProtoOAExecutionEvent,
     ProtoOAExecutionType,
+    ProtoOAOrderErrorEvent,
     ProtoOAOrderListReq,
     ProtoOAOrderListRes,
     ProtoOAReconcileReq,
@@ -29,6 +30,23 @@ from ..models.requests import (
 
 if TYPE_CHECKING:
     from ..connection import Protocol
+
+
+def _raise_if_order_error(response: object) -> None:
+    """Raise APIError if response is an order error event.
+
+    Args:
+        response: The response to check.
+
+    Raises:
+        APIError: If response is a ProtoOAOrderErrorEvent.
+    """
+    if isinstance(response, ProtoOAOrderErrorEvent):
+        raise APIError(
+            error_code=response.error_code or "ORDER_ERROR",
+            description=response.description or None,
+            ctid_trader_account_id=response.ctid_trader_account_id or None,
+        )
 
 
 # Map ProtoOAExecutionType enum values to our ExecutionType
@@ -177,6 +195,8 @@ class TradingAPI:
             timeout=timeout or self._default_timeout,
         )
 
+        _raise_if_order_error(response)
+
         if not isinstance(response, ProtoOAExecutionEvent):
             raise APIError(
                 error_code="UNEXPECTED_RESPONSE",
@@ -211,6 +231,8 @@ class TradingAPI:
             proto_request,
             timeout=timeout or self._default_timeout,
         )
+
+        _raise_if_order_error(response)
 
         if not isinstance(response, ProtoOAExecutionEvent):
             raise APIError(
@@ -250,6 +272,8 @@ class TradingAPI:
             timeout=timeout or self._default_timeout,
         )
 
+        _raise_if_order_error(response)
+
         if not isinstance(response, ProtoOAExecutionEvent):
             raise APIError(
                 error_code="UNEXPECTED_RESPONSE",
@@ -285,6 +309,8 @@ class TradingAPI:
             timeout=timeout or self._default_timeout,
         )
 
+        _raise_if_order_error(response)
+
         if not isinstance(response, ProtoOAExecutionEvent):
             raise APIError(
                 error_code="UNEXPECTED_RESPONSE",
@@ -319,6 +345,8 @@ class TradingAPI:
             proto_request,
             timeout=timeout or self._default_timeout,
         )
+
+        _raise_if_order_error(response)
 
         if not isinstance(response, ProtoOAExecutionEvent):
             raise APIError(
