@@ -83,6 +83,9 @@ class Protocol:
         self._reconnect_min_wait = reconnect_min_wait
         self._reconnect_max_wait = reconnect_max_wait
 
+        # Reconnection callback (set by CTraderClient)
+        self._on_reconnect: Callable[[], Awaitable[None]] | None = None
+
     @property
     def is_connected(self) -> bool:
         """Whether protocol is connected and reader is running."""
@@ -333,4 +336,11 @@ class Protocol:
                     self._reconnect_attempts,
                 )
                 await self._transport.connect()
-                # Note: Re-authentication is caller's responsibility
+
+        # Restart the reader loop
+        if self._task_group is not None:
+            self._task_group.start_soon(self._reader_loop)
+
+        # Notify callback for re-authentication
+        if self._on_reconnect is not None:
+            await self._on_reconnect()

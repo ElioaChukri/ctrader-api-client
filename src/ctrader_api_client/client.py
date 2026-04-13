@@ -8,7 +8,7 @@ from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
 from .auth import AuthManager
 from .config import ClientConfig
 from .connection import HeartbeatManager, Protocol, Transport
-from .events import Event, EventEmitter, EventRouter
+from .events import Event, EventEmitter, EventRouter, ReconnectedEvent
 
 
 logger = logging.getLogger(__name__)
@@ -122,6 +122,9 @@ class CTraderClient:
         )
 
         self._connected = False
+
+        # Set up reconnection handler
+        self._protocol._on_reconnect = self._handle_reconnect
 
     # -------------------------------------------------------------------------
     # Properties
@@ -239,6 +242,58 @@ class CTraderClient:
 
         self._connected = False
         logger.info("Connection closed")
+
+    async def _handle_reconnect(self) -> None:
+        """Handle automatic reconnection by re-authenticating.
+
+        Called by Protocol after successful reconnection. Re-authenticates
+        the app and all previously authenticated accounts, then emits
+        a ReconnectedEvent so users can restore subscriptions.
+        """
+        logger.info("Connection restored, re-authenticating...")
+
+        # Restart heartbeat monitoring
+        await self._heartbeat.restart()
+
+        restored: list[int] = []
+        failed: list[tuple[int, str]] = []
+
+        # Re-authenticate app
+        try:
+            await self._auth.authenticate_app()
+            app_auth_restored = True
+            logger.info("App re-authenticated successfully")
+        except Exception as e:
+            logger.error("Failed to re-authenticate app after reconnect: %s", e)
+            app_auth_restored = False
+            # Emit event with failure - user must handle this
+            await self._emitter.emit(
+                ReconnectedEvent(
+                    app_auth_restored=False,
+                    restored_accounts=(),
+                    failed_accounts=(),
+                )
+            )
+            return
+
+        # Re-authenticate all previously authenticated accounts
+        for account_id, credentials in list(self._auth._accounts.items()):
+            try:
+                await self._auth.authenticate_account(credentials, reauth=True)
+                restored.append(account_id)
+                logger.info("Re-authenticated account %d", account_id)
+            except Exception as e:
+                logger.error("Failed to re-authenticate account %d: %s", account_id, e)
+                failed.append((account_id, str(e)))
+
+        # Emit event for user to handle subscriptions
+        await self._emitter.emit(
+            ReconnectedEvent(
+                app_auth_restored=app_auth_restored,
+                restored_accounts=tuple(restored),
+                failed_accounts=tuple(failed),
+            )
+        )
 
     async def __aenter__(self) -> CTraderClient:
         """Async context manager entry.

@@ -73,6 +73,16 @@ class HeartbeatManager:
 
         self._protocol.remove_handler(ProtoHeartbeatEvent, self._on_heartbeat)
 
+    async def restart(self) -> None:
+        """Restart heartbeat monitoring after reconnection.
+
+        Resets the heartbeat timer and spawns a new heartbeat loop.
+        Should be called after the protocol has reconnected.
+        """
+        self._last_received = time.monotonic()
+        if self._task_group is not None:
+            self._task_group.start_soon(self._heartbeat_loop)
+
     async def _on_heartbeat(self, _event: ProtoHeartbeatEvent) -> None:
         """Handler called when heartbeat received from server.
 

@@ -275,6 +275,26 @@ class PnLChangeEvent:
     money_digits: int
 
 
+@dataclass(frozen=True, slots=True)
+class ReconnectedEvent:
+    """Emitted after automatic reconnection and re-authentication.
+
+    When a connection is lost and automatically restored, the client
+    re-authenticates the app and all previously authenticated accounts.
+    Subscriptions (spots, trendbars, depth) are NOT automatically restored
+    and must be re-subscribed by the user.
+
+    Attributes:
+        app_auth_restored: Whether app authentication succeeded.
+        restored_accounts: Account IDs that were successfully re-authenticated.
+        failed_accounts: Accounts that failed, as (account_id, error_message) tuples.
+    """
+
+    app_auth_restored: bool
+    restored_accounts: tuple[int, ...]
+    failed_accounts: tuple[tuple[int, str], ...]
+
+
 # Type alias for any event type
 type Event = (
     SpotEvent
@@ -290,4 +310,5 @@ type Event = (
     | TrailingStopChangedEvent
     | MarginCallTriggerEvent
     | PnLChangeEvent
+    | ReconnectedEvent
 )
