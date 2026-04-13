@@ -170,12 +170,12 @@ class EventEmitter:
     async def emit(self, event: Event) -> None:
         """Emit an event to all matching subscribers.
 
-        Handlers are called sequentially in registration order. This is to ensure predictable behavior when
-        multiple handlers are registered for the same event type. If handlers were called concurrently,
-        the order of execution would be non-deterministic, which could lead to inconsistent behavior for users.
+        Handlers are executed concurrently to prevent deadlocks when handlers
+        make API calls or other blocking I/O operations. If you need ordered operations,
+        implement that logic within a single handler.
 
-        If a handler raises, the error is logged and the optional error callback is invoked, then remaining handlers
-        continue.
+        If a handler raises, the error is logged and the optional error callback
+        is invoked. Other handlers continue unaffected.
 
         Args:
             event: The event to emit.

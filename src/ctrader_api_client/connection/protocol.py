@@ -272,18 +272,38 @@ class Protocol:
             await self._dispatch_event(inner)
 
     async def _dispatch_event(self, message: betterproto.Message) -> None:
-        """Call registered handlers for event type.
+        """Spawn tasks for registered handlers of this event type.
+
+        Handlers are spawned as concurrent tasks to prevent deadlocks if
+        handlers perform some blocking I/O calls that require responses from the reader loop.
 
         Args:
             message: The event message to dispatch.
         """
         handlers = self._event_handlers.get(type(message), [])
         for handler in handlers:
-            try:
-                await handler(message)
-            except Exception as e:
-                # Log but don't crash - other handlers should still run
-                logger.warning("Event handler error: %s", e)
+            if self._task_group is not None:
+                self._task_group.start_soon(self._call_handler_safe, handler, message)
+            else:
+                # Fallback if task group not available (shouldn't happen in normal operation)
+                await self._call_handler_safe(handler, message)
+
+    @staticmethod
+    async def _call_handler_safe(
+        handler: EventHandler,
+        message: betterproto.Message,
+    ) -> None:
+        """Call an event handler with exception safety.
+
+        Args:
+            handler: The handler to call.
+            message: The message to pass to the handler.
+        """
+        try:
+            await handler(message)
+        except Exception as e:
+            # Log but don't crash - other handlers should still run
+            logger.warning("Event handler error: %s", e)
 
     async def handle_disconnect(self) -> None:
         """Handle unexpected disconnection and attempt reconnection."""
