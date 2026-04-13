@@ -2,6 +2,10 @@
 
 A Python client for the cTrader Open API. Provides a high-level async interface for trading operations, market data subscriptions, and account management.
 
+Documentation:
+- [Library Docs](https://elioachukri.github.io/ctrader-api-client/)
+- [cTrader Open API Docs](https://help.ctrader.com/open-api/)
+
 > Note that this library is in early development. The API may change, and some features may be incomplete. Contributions and feedback are welcome!
 
 ## Requirements
