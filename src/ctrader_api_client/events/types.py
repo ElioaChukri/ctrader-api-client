@@ -131,7 +131,15 @@ class MarginChangeEvent:
 
 @dataclass(frozen=True, slots=True)
 class DepthQuote:
-    """Single depth of market quote."""
+    """
+    Single depth of market quote.
+
+    Attributes:
+        quote_id: Unique identifier for the quote (used for updates/deletions).
+        price: Quote price (raw integer, divide by 10^priceDigits).
+        size: Quote size (volume in cents).
+        is_bid: True if this is a bid quote, False if it's an ask quote.
+    """
 
     quote_id: int
     price: int
