@@ -101,7 +101,7 @@ class HeartbeatManager:
 
                 # Check if server heartbeat received recently
                 elapsed = time.monotonic() - self._last_received
-                if elapsed > self._timeout:
+                if 0 < self._timeout < elapsed:
                     logger.warning(
                         "Heartbeat timeout: no heartbeat received in %.1f seconds",
                         elapsed,

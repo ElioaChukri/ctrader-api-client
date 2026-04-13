@@ -13,7 +13,7 @@ class ClientConfig(BaseModel):
         client_id: OAuth application client ID.
         client_secret: OAuth application client secret.
         heartbeat_interval: Seconds between heartbeat sends.
-        heartbeat_timeout: Seconds without server heartbeat before disconnect.
+        heartbeat_timeout: Seconds without server heartbeat before disconnect. Set to 0 to disable.
         request_timeout: Default timeout for API requests in seconds.
         reconnect_attempts: Max reconnection attempts (0 to disable).
         reconnect_min_wait: Initial wait between reconnection attempts.
@@ -43,7 +43,7 @@ class ClientConfig(BaseModel):
 
     # Heartbeat settings
     heartbeat_interval: float = Field(default=10.0, gt=0)
-    heartbeat_timeout: float = Field(default=30.0, gt=0)
+    heartbeat_timeout: float = Field(default=30.0, ge=0)
 
     # Request settings
     request_timeout: float = Field(default=30.0, gt=0)

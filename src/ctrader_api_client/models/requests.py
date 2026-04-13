@@ -123,7 +123,7 @@ class NewOrderRequest(FrozenModel):
         trade_side_value = ProtoOATradeSide.BUY if self.side == OrderSide.BUY else ProtoOATradeSide.SELL
         time_in_force_value = ProtoOATimeInForce(_TIME_IN_FORCE_TO_PROTO[self.time_in_force])
 
-        trigger_method = ProtoOAOrderTriggerMethod.TRADE
+        trigger_method = None
         if self.stop_trigger_method:
             trigger_method = ProtoOAOrderTriggerMethod(_TRIGGER_TO_PROTO[self.stop_trigger_method])
 
