@@ -232,7 +232,7 @@ class Protocol:
                     proto_msg = deserialize_proto_message(raw)
                     inner = unwrap_message(proto_msg)
                     await self._dispatch_message(proto_msg, inner)
-                except FramingError:
+                except (FramingError, anyio.ClosedResourceError):
                     # Connection closed or corrupted
                     if self._running:
                         await self.handle_disconnect()
@@ -285,6 +285,11 @@ class Protocol:
     async def handle_disconnect(self) -> None:
         """Handle unexpected disconnection and attempt reconnection."""
         logger.info("Connection lost, attempting to reconnect...")
+
+        # Cancel the reader loop first to prevent race conditions
+        if self._reader_scope is not None:
+            self._reader_scope.cancel()
+            self._reader_scope = None
 
         # Close the transport
         await self._transport.close()

@@ -82,10 +82,16 @@ class Transport:
         """Close the connection gracefully.
 
         This method is idempotent - calling it multiple times is safe.
+        Handles already-closed streams gracefully.
         """
         if self._stream is not None:
-            await self._stream.aclose()
-            self._stream = None
+            stream = self._stream
+            self._stream = None  # Clear reference first to prevent re-entry
+            try:
+                await stream.aclose()
+            except (OSError, anyio.ClosedResourceError):
+                # Stream already closed or in bad state - ignore
+                pass
 
     async def send(self, data: bytes) -> None:
         """Send raw bytes over the connection.
