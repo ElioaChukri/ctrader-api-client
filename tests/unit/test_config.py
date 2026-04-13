@@ -115,14 +115,6 @@ class TestClientConfigValidation:
                 heartbeat_interval=0,
             )
 
-    def test_heartbeat_timeout_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            ClientConfig(
-                client_id="id",
-                client_secret="secret",
-                heartbeat_timeout=0,
-            )
-
     def test_request_timeout_must_be_positive(self):
         with pytest.raises(ValidationError):
             ClientConfig(

@@ -41,8 +41,24 @@ Example:
 from .client import CTraderClient
 from .config import ClientConfig
 
+# Re-export enums for easier access
+from .enums import (
+    AccountType,
+    ExecutionType,
+    OrderSide,
+    OrderType,
+    PositionStatus,
+    TrendbarPeriod,
+)
+
 
 __all__ = [
+    "AccountType",
     "CTraderClient",
     "ClientConfig",
+    "ExecutionType",
+    "OrderSide",
+    "OrderType",
+    "PositionStatus",
+    "TrendbarPeriod",
 ]
