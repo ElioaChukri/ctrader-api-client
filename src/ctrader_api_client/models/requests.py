@@ -150,7 +150,7 @@ class NewOrderRequest(FrozenModel):
             relative_take_profit=self.relative_take_profit or 0,
             guaranteed_stop_loss=self.guaranteed_stop_loss,
             trailing_stop_loss=self.trailing_stop_loss,
-            stop_trigger_method=trigger_method,
+            stop_trigger_method=trigger_method,  # ty: ignore[invalid-argument-type]
         )
 
 
