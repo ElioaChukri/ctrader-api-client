@@ -1,0 +1,67 @@
+  site_name: cTrader API Client
+  site_url: https://elioachukri.github.io/ctrader-api-client/
+  repo_url: https://github.com/elioachukri/ctrader-api-client
+  repo_name: elioachukri/ctrader-api-client
+
+  theme:
+    name: material
+    palette:
+      - scheme: default
+        primary: indigo
+        accent: indigo
+        toggle:
+          icon: material/brightness-7
+          name: Switch to dark mode
+      - scheme: slate
+        primary: indigo
+        accent: indigo
+        toggle:
+          icon: material/brightness-4
+          name: Switch to light mode
+    features:
+      - navigation.tabs
+      - navigation.sections
+      - navigation.expand
+      - navigation.top
+      - toc.integrate
+      - search.highlight
+      - search.suggest
+      - content.code.copy
+      - content.code.annotate
+
+  plugins:
+    - search
+    - autorefs
+    - mkdocstrings:
+        handlers:
+          python:
+            options:
+              docstring_style: google
+              show_source: true
+              show_root_heading: true
+              show_root_full_path: false
+              show_symbol_type_heading: true
+              show_symbol_type_toc: true
+              members_order: source
+              show_labels: false
+
+  nav:
+    - Home: index.md
+    - Getting Started: getting-started.md
+    - API Reference:
+      - Client: api/client.md
+      - Trading: api/trading.md
+      - Market Data: api/market-data.md
+      - Symbols: api/symbols.md
+      - Accounts: api/accounts.md
+      - Events: api/events.md
+      - Models: api/models.md
+      - Enums: api/enums.md
+
+  markdown_extensions:
+    - pymdownx.highlight:
+        anchor_linenums: true
+    - pymdownx.superfences
+    - admonition
+    - pymdownx.details
+    - nl2br
