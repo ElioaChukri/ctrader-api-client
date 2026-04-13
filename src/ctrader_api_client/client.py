@@ -415,10 +415,6 @@ class CTraderClient:
         Optional filters can be used to only receive events for specific
         accounts or symbols. The event must have the corresponding account_id or symbol_id attributes
         for filtering to work. Else this will raise ValueError at registration time.
-        It is advised to specify at least one filter since handlers
-        are called sequentially. Subscribing a large number of handlers with no
-        filters means they are all called sequentially, and handlers registered last
-        will potentially fire off much later than other ones.
 
         Args:
             event_type: The event class to listen for.

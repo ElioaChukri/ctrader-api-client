@@ -28,7 +28,10 @@ class EventEmitter:
     """Pub/sub event emitter with filtering.
 
     Allows subscribing to typed events with optional account_id and symbol_id
-    filters. Handlers are called sequentially in registration order.
+    filters. Handlers are called concurrently when an event is emitted, and exceptions are logged without
+    affecting other handlers.
+
+    If ordered execution of handlers is required, implement that logic within a single handler to ensure determinism.
 
     Example:
         ```python
@@ -69,12 +72,6 @@ class EventEmitter:
         symbol_id: int | None = None,
     ) -> None:
         """Subscribe to an event type.
-
-        Since handlers are called sequentially, it is highly recommended to include account_id or symbol_id filters
-        to avoid unnecessary handler invocations. In applications where many different accounts are handled,
-        the number handlers for an event can easily grow to hundreds or thousands, and without filters every handler
-        will be called for every event, causing significant performance issues.
-
 
         Args:
             event_type: The event class to subscribe to.
