@@ -235,7 +235,7 @@ class Protocol:
                     proto_msg = deserialize_proto_message(raw)
                     inner = unwrap_message(proto_msg)
                     await self._dispatch_message(proto_msg, inner)
-                except (FramingError, anyio.ClosedResourceError):
+                except (FramingError, anyio.ClosedResourceError, anyio.EndOfStream):
                     # Connection closed or corrupted
                     if self._running:
                         await self.handle_disconnect()
