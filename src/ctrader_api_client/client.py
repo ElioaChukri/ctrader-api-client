@@ -2,19 +2,64 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, overload
 
 from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
 from .auth import AuthManager
 from .config import ClientConfig
 from .connection import HeartbeatManager, Protocol, Transport
-from .events import Event, EventEmitter, EventRouter, ReadyEvent, ReconnectedEvent
+from .events import (
+    AccountDisconnectEvent,
+    ClientDisconnectEvent,
+    DepthEvent,
+    Event,
+    EventEmitter,
+    EventRouter,
+    ExecutionEvent,
+    MarginCallTriggerEvent,
+    MarginChangeEvent,
+    OrderErrorEvent,
+    PnLChangeEvent,
+    ReadyEvent,
+    ReconnectedEvent,
+    SpotEvent,
+    SymbolChangedEvent,
+    TokenInvalidatedEvent,
+    TraderUpdateEvent,
+    TrailingStopChangedEvent,
+)
 
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=Event)
 EventHandler = Callable[[T], Awaitable[None]]
+
+# Constrained TypeVars for overloaded on() method
+# Events that support both account_id and symbol_id filters
+T_BothFilters = TypeVar("T_BothFilters", SpotEvent, ExecutionEvent, DepthEvent)
+
+# Events that support only account_id filter
+T_AccountIdOnly = TypeVar(
+    "T_AccountIdOnly",
+    ReadyEvent,
+    OrderErrorEvent,
+    TraderUpdateEvent,
+    MarginChangeEvent,
+    AccountDisconnectEvent,
+    SymbolChangedEvent,
+    TrailingStopChangedEvent,
+    MarginCallTriggerEvent,
+    PnLChangeEvent,
+)
+
+# Events that support no filters
+T_NoFilters = TypeVar(
+    "T_NoFilters",
+    ReconnectedEvent,
+    ClientDisconnectEvent,
+    TokenInvalidatedEvent,
+)
 
 
 class CTraderClient:
@@ -333,6 +378,29 @@ class CTraderClient:
     # -------------------------------------------------------------------------
     # Event Registration
     # -------------------------------------------------------------------------
+
+    @overload
+    def on(
+        self,
+        event_type: type[T_BothFilters],
+        *,
+        account_id: int | None = ...,
+        symbol_id: int | None = ...,
+    ) -> Callable[[EventHandler[T_BothFilters]], EventHandler[T_BothFilters]]: ...
+
+    @overload
+    def on(
+        self,
+        event_type: type[T_AccountIdOnly],
+        *,
+        account_id: int | None = ...,
+    ) -> Callable[[EventHandler[T_AccountIdOnly]], EventHandler[T_AccountIdOnly]]: ...
+
+    @overload
+    def on(
+        self,
+        event_type: type[T_NoFilters],
+    ) -> Callable[[EventHandler[T_NoFilters]], EventHandler[T_NoFilters]]: ...
 
     def on(
         self,
