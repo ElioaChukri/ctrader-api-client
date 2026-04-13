@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TokenRefreshCallback = Callable[[AccountCredentials], Awaitable[None]]
+AccountReadyCallback = Callable[[int, bool], Awaitable[None]]  # (account_id, is_reconnect)
 
 
 class AuthManager:
@@ -77,6 +78,7 @@ class AuthManager:
         refresh_retry_min_wait: float = 1.0,
         refresh_retry_max_wait: float = 30.0,
         on_tokens_refreshed: TokenRefreshCallback | None = None,
+        on_account_ready: AccountReadyCallback | None = None,
     ) -> None:
         """Initialize the authentication manager.
 
@@ -96,6 +98,8 @@ class AuthManager:
                 Defaults to 30.0.
             on_tokens_refreshed: Async callback invoked when tokens are refreshed.
                 Receives the new AccountCredentials. Use this to persist tokens.
+            on_account_ready: Async callback invoked when an account is authenticated.
+                Receives (account_id, is_reconnect). Use this to perform any initial client setup.
         """
         self._protocol = protocol
         self._client_id = client_id
@@ -106,6 +110,7 @@ class AuthManager:
         self._retry_min_wait = refresh_retry_min_wait
         self._retry_max_wait = refresh_retry_max_wait
         self._on_tokens_refreshed = on_tokens_refreshed
+        self._on_account_ready = on_account_ready
 
         # Account storage
         self._accounts: dict[int, AccountCredentials] = {}
@@ -216,6 +221,18 @@ class AuthManager:
         # Store credentials for refresh monitoring
         self._accounts[credentials.account_id] = credentials
         logger.info("Account %d authenticated successfully", credentials.account_id)
+
+        # Notify callback
+        if self._on_account_ready is not None:
+            try:
+                await self._on_account_ready(credentials.account_id, reauth)
+            except Exception as e:
+                logger.warning(
+                    "Account ready callback failed for account %d: %s",
+                    credentials.account_id,
+                    e,
+                )
+
         return response
 
     async def get_accounts(

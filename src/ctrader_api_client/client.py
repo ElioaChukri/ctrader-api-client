@@ -8,7 +8,7 @@ from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
 from .auth import AuthManager
 from .config import ClientConfig
 from .connection import HeartbeatManager, Protocol, Transport
-from .events import Event, EventEmitter, EventRouter, ReconnectedEvent
+from .events import Event, EventEmitter, EventRouter, ReadyEvent, ReconnectedEvent
 
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,7 @@ class CTraderClient:
             protocol=self._protocol,
             client_id=config.client_id,
             client_secret=config.client_secret,
+            on_account_ready=self._emit_ready_event,
         )
 
         # API namespaces
@@ -243,6 +244,17 @@ class CTraderClient:
         self._connected = False
         logger.info("Connection closed")
 
+    async def _emit_ready_event(self, account_id: int, is_reconnect: bool) -> None:
+        """Emit ReadyEvent when an account is authenticated.
+
+        Called by AuthManager after successful account authentication.
+
+        Args:
+            account_id: The authenticated account ID.
+            is_reconnect: True if this is a re-authentication after reconnection.
+        """
+        await self._emitter.emit(ReadyEvent(account_id=account_id, is_reconnect=is_reconnect))
+
     async def _handle_reconnect(self) -> None:
         """Handle automatic reconnection by re-authenticating.
 
@@ -333,7 +345,8 @@ class CTraderClient:
 
         Handlers are called when events of the specified type arrive.
         Optional filters can be used to only receive events for specific
-        accounts or symbols.
+        accounts or symbols. The event must have the corresponding account_id or symbol_id attributes
+        for filtering to work. Else this will raise ValueError at registration time.
         It is advised to specify at least one filter since handlers
         are called sequentially. Subscribing a large number of handlers with no
         filters means they are all called sequentially, and handlers registered last

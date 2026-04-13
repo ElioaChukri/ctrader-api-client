@@ -80,8 +80,19 @@ class EventEmitter:
             event_type: The event class to subscribe to.
             handler: Async function to call when event occurs.
             account_id: Only receive events for this account (optional).
+                Raises ValueError if event_type doesn't have an account_id field.
             symbol_id: Only receive events for this symbol (optional).
+                Raises ValueError if event_type doesn't have a symbol_id field.
+
+        Raises:
+            ValueError: If a filter is provided but the event type doesn't have that field.
         """
+        # Validate that event type supports the requested filters
+        if account_id is not None:
+            self._validate_filter(event_type, "account_id")
+        if symbol_id is not None:
+            self._validate_filter(event_type, "symbol_id")
+
         if event_type not in self._subscriptions:
             self._subscriptions[event_type] = []
 
@@ -195,6 +206,24 @@ class EventEmitter:
                             type(callback_error).__name__,
                             callback_error,
                         )
+
+    @staticmethod
+    def _validate_filter(event_type: type, field_name: str) -> None:
+        """Validate that an event type supports filtering by a field.
+
+        Args:
+            event_type: The event class to check.
+            field_name: The field name to filter by.
+
+        Raises:
+            ValueError: If the event type doesn't have the specified field.
+        """
+        dataclass_fields = getattr(event_type, "__dataclass_fields__", {})
+        if field_name not in dataclass_fields:
+            raise ValueError(
+                f"{event_type.__name__} does not have a '{field_name}' field "
+                f"and cannot be filtered by it. Remove the {field_name} parameter."
+            )
 
     @staticmethod
     def _matches_filter(event: Event, sub: Subscription) -> bool:

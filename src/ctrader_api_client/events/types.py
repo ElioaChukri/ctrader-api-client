@@ -282,7 +282,8 @@ class ReconnectedEvent:
     When a connection is lost and automatically restored, the client
     re-authenticates the app and all previously authenticated accounts.
     Subscriptions (spots, trendbars, depth) are NOT automatically restored
-    and must be re-subscribed by the user.
+    and should be handled using ReadyEvent instead.
+    Use this event for any custom logic that depends on reconnection, such as logging or alerting.
 
     Attributes:
         app_auth_restored: Whether app authentication succeeded.
@@ -293,6 +294,22 @@ class ReconnectedEvent:
     app_auth_restored: bool
     restored_accounts: tuple[int, ...]
     failed_accounts: tuple[tuple[int, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadyEvent:
+    """Emitted when an account is authenticated and ready for use.
+
+    Fired after both initial authentication and reconnection re-authentication.
+    Use this to set up subscriptions that should persist across reconnections.
+
+    Attributes:
+        account_id: The cTID trader account ID that is now ready.
+        is_reconnect: True if this follows a reconnection, False for initial auth.
+    """
+
+    account_id: int
+    is_reconnect: bool
 
 
 # Type alias for any event type
@@ -311,4 +328,5 @@ type Event = (
     | MarginCallTriggerEvent
     | PnLChangeEvent
     | ReconnectedEvent
+    | ReadyEvent
 )
