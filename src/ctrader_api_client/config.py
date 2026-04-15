@@ -43,7 +43,7 @@ class ClientConfig(BaseModel):
 
     # Heartbeat settings
     heartbeat_interval: float = Field(default=10.0, gt=0)
-    heartbeat_timeout: float = Field(default=30.0, ge=0)
+    heartbeat_timeout: float = Field(default=0, ge=0)
 
     # Request settings
     request_timeout: float = Field(default=30.0, gt=0)
