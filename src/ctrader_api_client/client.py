@@ -264,6 +264,7 @@ class CTraderClient:
         await self._transport.connect()
         await self._protocol.start()
         await self._heartbeat.start()
+        await self._auth.start()
         self._router.start()
 
         self._connected = True
@@ -289,15 +290,22 @@ class CTraderClient:
         self._connected = False
         logger.info("Connection closed")
 
-    async def _emit_ready_event(self, account_id: int, is_reconnect: bool) -> None:
+    async def _emit_ready_event(self, account_id: int, is_reconnect: bool, is_reauth: bool) -> None:
         """Emit ReadyEvent when an account is authenticated.
 
         Called by AuthManager after successful account authentication.
+
+        Does NOT emit if this is a re-auth with no reconnection (e.g. token refresh), since subscriptions
+        are not lost in that case and users don't need to restore them.
 
         Args:
             account_id: The authenticated account ID.
             is_reconnect: True if this is a re-authentication after reconnection.
         """
+        if is_reauth and not is_reconnect:
+            # Don't emit ReadyEvent for token refresh re-auth, since subscriptions are not lost
+            return
+
         await self._emitter.emit(ReadyEvent(account_id=account_id, is_reconnect=is_reconnect))
 
     async def _handle_reconnect(self) -> None:
@@ -336,7 +344,7 @@ class CTraderClient:
         # Re-authenticate all previously authenticated accounts
         for account_id, credentials in list(self._auth._accounts.items()):
             try:
-                await self._auth.authenticate_account(credentials, reauth=True)
+                await self._auth.authenticate_account(credentials, reconnect=True)
                 restored.append(account_id)
                 logger.info("Re-authenticated account %d", account_id)
             except Exception as e:

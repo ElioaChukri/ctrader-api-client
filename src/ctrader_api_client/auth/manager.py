@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TokenRefreshCallback = Callable[[AccountCredentials], Awaitable[None]]
-AccountReadyCallback = Callable[[int, bool], Awaitable[None]]  # (account_id, is_reconnect)
+AccountReadyCallback = Callable[[int, bool, bool], Awaitable[None]]  # (account_id, is_reconnect, is_reauth)
 
 
 class AuthManager:
@@ -179,10 +179,7 @@ class AuthManager:
         return response
 
     async def authenticate_account(
-        self,
-        credentials: AccountCredentials,
-        timeout: float = 30.0,
-        reauth: bool = False,
+        self, credentials: AccountCredentials, timeout: float = 30.0, reauth: bool = False, reconnect: bool = False
     ) -> ProtoOAAccountAuthRes:
         """Authenticate a trading account.
 
@@ -192,6 +189,8 @@ class AuthManager:
             credentials: The account credentials including tokens.
             timeout: Request timeout in seconds.
             reauth: Whether this is a re-authentication (token refresh) or initial auth.
+            reconnect: Whether this authentication is happening during a connection reconnect. This can be used
+                to differentiate between a token refresh and a full reconnect scenario in the account ready callback.
 
         Returns:
             The authentication response from the server.
@@ -225,7 +224,7 @@ class AuthManager:
         # Notify callback
         if self._on_account_ready is not None:
             try:
-                await self._on_account_ready(credentials.account_id, reauth)
+                await self._on_account_ready(credentials.account_id, reconnect, reauth)
             except Exception as e:
                 logger.warning(
                     "Account ready callback failed for account %d: %s",
