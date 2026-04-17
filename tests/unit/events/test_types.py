@@ -33,15 +33,17 @@ class TestSpotEvent:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=timestamp,
         )
 
         assert event.account_id == 123
         assert event.symbol_id == 1
-        assert event.bid == 123000
-        assert event.ask == 123050
+        assert event.bid == 1.23000
+        assert event.ask == 1.23050
+        assert event.trendbar is None
         assert event.timestamp == timestamp
 
     def test_spot_event_is_frozen(self) -> None:
@@ -49,13 +51,14 @@ class TestSpotEvent:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
 
         with pytest.raises(AttributeError):
-            event.bid = 124000
+            event.bid = 1.24000  # type: ignore[misc]
 
     def test_spot_event_with_none_values(self) -> None:
         """Test SpotEvent with None bid/ask."""
@@ -64,6 +67,7 @@ class TestSpotEvent:
             symbol_id=1,
             bid=None,
             ask=None,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
 

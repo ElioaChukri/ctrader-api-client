@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOAAccessRights, ProtoOAAccountType
@@ -90,8 +89,7 @@ class Account(FrozenModel):
     Attributes:
         account_id: The cTID trader account ID.
         trader_login: The trader's login number.
-        balance: Account balance (raw integer, use get_balance() for Decimal).
-        money_digits: Decimal places for monetary values.
+        balance: Account balance
         leverage_in_cents: Account leverage in cents (e.g., 10000 = 1:100).
         account_type: Account type (HEDGED, NETTED, SPREAD_BETTING).
         access_rights: Current access rights for the account.
@@ -102,15 +100,14 @@ class Account(FrozenModel):
         registration_timestamp: When the account was registered.
         max_leverage: Maximum allowed leverage.
         balance_version: Version number for balance updates.
-        manager_bonus: Manager bonus amount (raw integer).
-        ib_bonus: IB bonus amount (raw integer).
-        non_withdrawable_bonus: Non-withdrawable bonus amount (raw integer).
+        manager_bonus: Manager bonus amount
+        ib_bonus: IB bonus amount
+        non_withdrawable_bonus: Non-withdrawable bonus amount
     """
 
     account_id: int
     trader_login: int
-    balance: int
-    money_digits: int
+    balance: float
     leverage_in_cents: int
     account_type: AccountType
     access_rights: AccessRights
@@ -123,17 +120,9 @@ class Account(FrozenModel):
     # Optional fields
     max_leverage: int | None = None
     balance_version: int | None = None
-    manager_bonus: int | None = None
-    ib_bonus: int | None = None
-    non_withdrawable_bonus: int | None = None
-
-    def get_balance(self) -> Decimal:
-        """Get balance as Decimal.
-
-        Returns:
-            Balance divided by 10^money_digits.
-        """
-        return Decimal(self.balance) / Decimal(10**self.money_digits)
+    manager_bonus: float | None = None
+    ib_bonus: float | None = None
+    non_withdrawable_bonus: float | None = None
 
     def get_leverage(self) -> str:
         """Get leverage as human-readable string.
@@ -154,11 +143,12 @@ class Account(FrozenModel):
         Returns:
             A new Account instance.
         """
+        money_digits = proto.money_digits if proto.money_digits else 2
+        divisor = 10**money_digits
         return cls(
             account_id=proto.ctid_trader_account_id,
             trader_login=proto.trader_login,
-            balance=proto.balance,
-            money_digits=proto.money_digits if proto.money_digits else 2,
+            balance=proto.balance / divisor,
             leverage_in_cents=proto.leverage_in_cents,
             account_type=_ACCOUNT_TYPE_MAP.get(proto.account_type, AccountType.HEDGED),
             access_rights=_ACCESS_RIGHTS_MAP.get(proto.access_rights, AccessRights.FULL_ACCESS),
@@ -171,7 +161,7 @@ class Account(FrozenModel):
             ),
             max_leverage=proto.max_leverage if proto.max_leverage else None,
             balance_version=proto.balance_version if proto.balance_version else None,
-            manager_bonus=proto.manager_bonus if proto.manager_bonus else None,
-            ib_bonus=proto.ib_bonus if proto.ib_bonus else None,
-            non_withdrawable_bonus=proto.non_withdrawable_bonus if proto.non_withdrawable_bonus else None,
+            manager_bonus=proto.manager_bonus / divisor if proto.manager_bonus else None,
+            ib_bonus=proto.ib_bonus / divisor if proto.ib_bonus else None,
+            non_withdrawable_bonus=proto.non_withdrawable_bonus / divisor if proto.non_withdrawable_bonus else None,
         )

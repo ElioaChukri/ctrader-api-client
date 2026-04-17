@@ -82,8 +82,8 @@ class CTraderClient:
 
 
         @client.on(SpotEvent, symbol_id=270)
-        async def on_eurusd(event: SpotEvent) -> None:
-            print(f"EURUSD: {event.bid}/{event.ask}")
+        async def on_price(event: SpotEvent) -> None:
+            print(f"PRICE: {event.bid}/{event.ask}")
 
 
         async with client:

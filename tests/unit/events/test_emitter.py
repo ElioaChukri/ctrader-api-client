@@ -140,8 +140,9 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -160,8 +161,9 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=456,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -180,8 +182,9 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=2,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -199,8 +202,9 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -229,8 +233,9 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -254,8 +259,9 @@ class TestEventEmitterErrorHandling:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -277,8 +283,9 @@ class TestEventEmitterErrorHandling:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -301,8 +308,9 @@ class TestEventEmitterErrorHandling:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=123000,
-            ask=123050,
+            bid=1.23000,
+            ask=1.23050,
+            trendbar=None,
             timestamp=datetime.now(UTC),
         )
 

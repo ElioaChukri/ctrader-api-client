@@ -30,10 +30,30 @@ from ctrader_api_client.events import SpotEvent
 await client.market_data.subscribe_spots(account_id, [270, 271])
 
 
-# Handle price updates
+# Handle price updates - bid/ask are floats
 @client.on(SpotEvent, symbol_id=270)
 async def on_price(event: SpotEvent):
     print(f"Bid: {event.bid}, Ask: {event.ask}")
+```
+
+### Subscribe to Live Trendbars
+
+```python
+from ctrader_api_client.events import SpotEvent
+from ctrader_api_client.enums import TrendbarPeriod
+
+# Subscribe to M1 trendbars
+await client.market_data.subscribe_trendbars(account_id, symbol_id=270, period=TrendbarPeriod.M1)
+
+# Trendbar data is delivered inside SpotEvent
+@client.on(SpotEvent, symbol_id=270)
+async def on_spot(event: SpotEvent):
+    print(f"Price: {event.bid}/{event.ask}")
+
+    # Check if this event contains trendbar data
+    if event.trendbar:
+        bar = event.trendbar
+        print(f"Bar: O={bar.open} H={bar.high} L={bar.low} C={bar.close} V={bar.volume}")
 ```
 
 ### Subscribe to Depth of Market
@@ -55,32 +75,36 @@ async def on_depth(event: DepthEvent):
 ### Get Historical Trendbars
 
 ```python
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from ctrader_api_client.enums import TrendbarPeriod
 
 trendbars = await client.market_data.get_trendbars(
     account_id,
     symbol_id=270,
     period=TrendbarPeriod.H1,
-    from_timestamp=datetime.now() - timedelta(days=7),
-    to_timestamp=datetime.now(),
+    from_timestamp=datetime.now(UTC) - timedelta(days=7),
+    to_timestamp=datetime.now(UTC),
 )
 
+# OHLC values are already floats (converted from raw integers)
 for bar in trendbars:
-    print(f"O:{bar.open} H:{bar.high} L:{bar.low} C:{bar.close} V:{bar.volume}")
+    print(f"{bar.timestamp}: O={bar.open} H={bar.high} L={bar.low} C={bar.close} V={bar.volume}")
 ```
 
 ### Get Tick Data
 
 ```python
+from datetime import datetime, timedelta, UTC
+
 ticks = await client.market_data.get_tick_data(
     account_id,
     symbol_id=270,
-    from_timestamp=datetime.now() - timedelta(hours=1),
-    to_timestamp=datetime.now(),
+    from_timestamp=datetime.now(UTC) - timedelta(hours=1),
+    to_timestamp=datetime.now(UTC),
     quote_type="BID",  # or "ASK"
 )
 
+# Price is already a float
 for tick in ticks:
     print(f"{tick.timestamp}: {tick.price}")
 ```
@@ -109,9 +133,11 @@ It is recommended to use `ReadyEvent` to keep all subscriptions centralized in o
 
 ```python
 from ctrader_api_client.events import ReadyEvent
+from ctrader_api_client.enums import TrendbarPeriod
 
 @client.on(ReadyEvent)
 async def on_ready(event: ReadyEvent):
     # This runs on initial auth AND after reconnection
     await client.market_data.subscribe_spots(event.account_id, [270, 271])
+    await client.market_data.subscribe_trendbars(event.account_id, 270, TrendbarPeriod.M1)
 ```

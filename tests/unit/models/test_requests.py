@@ -162,12 +162,13 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.MARKET,
-            relative_stop_loss=50,
-            relative_take_profit=100,
+            relative_stop_loss=0.0005,  # 5 pips in price units
+            relative_take_profit=0.001,  # 10 pips in price units
         )
 
         proto = request.to_proto(account_id=12345)
 
+        # Values are multiplied by 1e5 for the proto
         assert proto.relative_stop_loss == 50
         assert proto.relative_take_profit == 100
 

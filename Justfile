@@ -26,7 +26,7 @@ fmt directory='':
 
 # Run type checking using ty, optionally specifying a directory to check.
 type-check directory='':
-    uv run ty check {{directory}}
+    uv run zuban check {{directory}}
 
 # Run tests using pytest, optionally specifying a directory to test.
 test directory='':

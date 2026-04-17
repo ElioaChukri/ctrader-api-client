@@ -17,6 +17,8 @@ from .._internal.proto import (
     ProtoOAOrderListRes,
     ProtoOAReconcileReq,
     ProtoOAReconcileRes,
+    ProtoOAv1PnLChangeSubscribeReq,
+    ProtoOAv1PnLChangeSubscribeRes,
 )
 from ..enums import ExecutionType, OrderSide
 from ..events import ExecutionEvent
@@ -162,6 +164,31 @@ class TradingAPI:
         self._protocol = protocol
         self._default_timeout = default_timeout
 
+    async def subscribe_to_pnl_changes(self, account_id: int) -> None:
+        """Subscribe to PnL change events.
+
+        After subscribing, PnL change data will be delivered via the event system.
+        Use `@client.on(PnLChangeEvent)` to handle them.
+
+        Note:
+            This subscription seems to be currently rate-limited by cTrader, so it may not work as expected.
+
+        Args:
+            account_id: The cTID trader account ID.
+        """
+        request = ProtoOAv1PnLChangeSubscribeReq(ctid_trader_account_id=account_id)
+
+        response = await self._protocol.send_request(
+            request,
+            timeout=self._default_timeout,
+        )
+
+        if not isinstance(response, ProtoOAv1PnLChangeSubscribeRes):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected ProtoOAv1PnLChangeSubscribeRes, got {type(response).__name__}",
+            )
+
     async def place_order(
         self,
         account_id: int,
@@ -217,7 +244,7 @@ class TradingAPI:
 
         Args:
             account_id: The cTID trader account ID.
-            request: Amendment parameters (order_id required).
+            request: Amendment parameters.
             timeout: Request timeout (uses default if None).
 
         Returns:
@@ -331,7 +358,7 @@ class TradingAPI:
 
         Args:
             account_id: The cTID trader account ID.
-            request: Amendment parameters (position_id required).
+            request: Amendment parameters.
             timeout: Request timeout (uses default if None).
 
         Returns:
@@ -391,6 +418,52 @@ class TradingAPI:
 
         return [Position.from_proto(p) for p in response.position]
 
+    async def get_orders(
+        self,
+        account_id: int,
+        timeout: float | None = None,
+        from_timestamp: datetime | None = None,
+        to_timestamp: datetime | None = None,
+    ) -> list[Order]:
+        """Get all orders in a time range.
+
+        Args:
+            account_id: The cTID trader account ID.
+            timeout: Request timeout (uses default if None).
+            from_timestamp: Start of time range (inclusive, optional).
+            to_timestamp: End of time range (inclusive, optional).
+
+        Returns:
+            List of Order objects in the time range.
+
+        Note:
+            If from_timestamp and to_timestamp are not provided, returns all orders.
+            The maximum time range may be limited by the server.
+            For large ranges, consider paginating with smaller windows.
+
+        Raises:
+            APIError: If request fails.
+            CTraderConnectionTimeoutError: If request times out.
+        """
+        request = ProtoOAOrderListReq(
+            ctid_trader_account_id=account_id,
+            from_timestamp=int(from_timestamp.timestamp() * 1000) if from_timestamp else None,  # type: ignore [arg-type]
+            to_timestamp=int(to_timestamp.timestamp() * 1000) if to_timestamp else None,  # type: ignore [arg-type]
+        )
+
+        response = await self._protocol.send_request(
+            request,
+            timeout=timeout or self._default_timeout,
+        )
+
+        if not isinstance(response, ProtoOAOrderListRes):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected ProtoOAOrderListRes, got {type(response).__name__}",
+            )
+
+        return [Order.from_proto(o) for o in response.order]
+
     async def get_pending_orders(
         self,
         account_id: int,
@@ -422,7 +495,11 @@ class TradingAPI:
                 description=f"Expected ProtoOAOrderListRes, got {type(response).__name__}",
             )
 
-        return [Order.from_proto(o) for o in response.order]
+        orders = [Order.from_proto(o) for o in response.order]
+
+        pending_orders = [o for o in orders if o.is_pending]
+
+        return pending_orders
 
     async def get_deals_by_position_id(
         self,

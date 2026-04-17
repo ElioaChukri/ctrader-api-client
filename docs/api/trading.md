@@ -28,11 +28,15 @@ Access via `client.trading`.
 from ctrader_api_client.models import NewOrderRequest
 from ctrader_api_client.enums import OrderType, OrderSide
 
+# Get symbol info for volume conversion
+symbol = await client.symbols.get_by_id(account_id, 270)
+
+# Place a 0.1 lot buy order
 request = NewOrderRequest(
     symbol_id=270,
     order_type=OrderType.MARKET,
     side=OrderSide.BUY,
-    volume=100,  # 0.01 lots (volume in cents)
+    volume=symbol.lots_to_volume(0.1),  # Convert lots to volume
 )
 
 result = await client.trading.place_order(account_id, request)
@@ -42,14 +46,33 @@ print(f"Order {result.order_id}: {result.execution_type}")
 ### Place a Limit Order
 
 ```python
+# Get symbol info
+symbol = await client.symbols.get_by_id(account_id, 270)
+
 request = NewOrderRequest(
     symbol_id=270,
     order_type=OrderType.LIMIT,
     side=OrderSide.BUY,
-    volume=100,
+    volume=symbol.lots_to_volume(0.1),
     limit_price=5000.0,  # Limit price
-    stop_loss=4950.0,    # Optional SL
+    stop_loss=4950.0,  # Optional SL
     take_profit=5100.0,  # Optional TP
+)
+
+result = await client.trading.place_order(account_id, request)
+```
+
+### Place an Order with Relative SL/TP
+
+```python
+# Relative SL/TP are specified in price units (distance from entry)
+request = NewOrderRequest(
+    symbol_id=270,
+    order_type=OrderType.MARKET,
+    side=OrderSide.BUY,
+    volume=symbol.lots_to_volume(0.1),
+    relative_stop_loss=50.0,   # 50 points below entry
+    relative_take_profit=100.0,  # 100 points above entry
 )
 
 result = await client.trading.place_order(account_id, request)
@@ -67,9 +90,30 @@ print(f"Cancelled: {result.execution_type}")
 ```python
 from ctrader_api_client.models import ClosePositionRequest
 
+# First, get the position to know its volume
+positions = await client.trading.get_open_positions(account_id)
+position = next(p for p in positions if p.position_id == position_id)
+
+# Close the entire position
 request = ClosePositionRequest(
-    position_id=123456,
-    volume=100,  # Close 0.01 lots (or full volume)
+    position_id=position.position_id,
+    volume=position.volume,  # Use full volume for complete close
+)
+
+result = await client.trading.close_position(account_id, request)
+print(f"Position closed: {result.execution_type}")
+```
+
+### Partial Close a Position
+
+```python
+# Get symbol to convert lots
+symbol = await client.symbols.get_by_id(account_id, position.symbol_id)
+
+# Close half of a 1-lot position
+request = ClosePositionRequest(
+    position_id=position.position_id,
+    volume=symbol.lots_to_volume(0.5),  # Close 0.5 lots
 )
 
 result = await client.trading.close_position(account_id, request)
@@ -95,7 +139,12 @@ result = await client.trading.amend_position(account_id, request)
 positions = await client.trading.get_open_positions(account_id)
 
 for pos in positions:
-    print(f"Position {pos.position_id}: {pos.volume} @ {pos.entry_price}")
+    # Get symbol for volume conversion
+    symbol = await client.symbols.get_by_id(account_id, pos.symbol_id)
+    lots = symbol.volume_to_lots(pos.volume)
+
+    print(f"Position {pos.position_id}: {lots} lots @ {pos.entry_price}")
+    print(f"  Swap: {pos.swap}, Commission: {pos.commission}")
 ```
 
 ### Get Pending Orders
@@ -120,4 +169,9 @@ deals = await client.trading.get_deals(
 
 for deal in deals:
     print(f"Deal {deal.deal_id}: {deal.side} {deal.filled_volume}")
+    print(f"  Commission: {deal.commission}")
+
+    # Check if this deal closed a position
+    if deal.is_closing_deal and deal.close_detail:
+        print(f"  Gross P/L: {deal.close_detail.gross_profit}")
 ```

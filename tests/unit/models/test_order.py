@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import (
@@ -12,25 +11,8 @@ from ctrader_api_client.enums import (
     OrderType,
     StopTriggerMethod,
     TimeInForce,
-    TradingMode,
 )
-from ctrader_api_client.models import Order, Symbol
-
-
-def _create_symbol(digits: int = 5) -> Symbol:
-    """Create a Symbol for testing."""
-    return Symbol(
-        symbol_id=1,
-        digits=digits,
-        pip_position=4,
-        lot_size=100000,
-        min_volume=1000,
-        max_volume=10000000,
-        step_volume=1000,
-        trading_mode=TradingMode.ENABLED,
-        swap_long=0.0,
-        swap_short=0.0,
-    )
+from ctrader_api_client.models import Order
 
 
 class TestOrderFromProto:
@@ -246,117 +228,6 @@ class TestOrderFromProto:
             proto.time_in_force = proto_value
             order = Order.from_proto(proto)
             assert order.time_in_force == expected_tif
-
-
-class TestOrderHelpers:
-    """Tests for Order helper methods."""
-
-    def test_get_limit_price_when_set(self) -> None:
-        """Test get_limit_price returns correct Decimal when set."""
-        order = Order(
-            order_id=1,
-            symbol_id=1,
-            side=OrderSide.BUY,
-            order_type=OrderType.LIMIT,
-            status=OrderStatus.ACCEPTED,
-            volume=100000,
-            time_in_force=TimeInForce.GOOD_TILL_CANCEL,
-            open_timestamp=datetime.now(UTC),
-            limit_price=1.12345,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = order.get_limit_price(symbol)
-        assert result == Decimal("1.12345")
-
-    def test_get_limit_price_when_none(self) -> None:
-        """Test get_limit_price returns None when not set."""
-        order = Order(
-            order_id=1,
-            symbol_id=1,
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            status=OrderStatus.ACCEPTED,
-            volume=100000,
-            time_in_force=TimeInForce.GOOD_TILL_CANCEL,
-            open_timestamp=datetime.now(UTC),
-        )
-        symbol = _create_symbol()
-
-        result = order.get_limit_price(symbol)
-        assert result is None
-
-    def test_get_stop_price_when_set(self) -> None:
-        """Test get_stop_price returns correct Decimal when set."""
-        order = Order(
-            order_id=1,
-            symbol_id=1,
-            side=OrderSide.BUY,
-            order_type=OrderType.STOP,
-            status=OrderStatus.ACCEPTED,
-            volume=100000,
-            time_in_force=TimeInForce.GOOD_TILL_CANCEL,
-            open_timestamp=datetime.now(UTC),
-            stop_price=1.13000,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = order.get_stop_price(symbol)
-        assert result == Decimal("1.13000")
-
-    def test_get_execution_price_when_set(self) -> None:
-        """Test get_execution_price returns correct Decimal when set."""
-        order = Order(
-            order_id=1,
-            symbol_id=1,
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            status=OrderStatus.FILLED,
-            volume=100000,
-            time_in_force=TimeInForce.GOOD_TILL_CANCEL,
-            open_timestamp=datetime.now(UTC),
-            execution_price=1.12400,
-            executed_volume=100000,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = order.get_execution_price(symbol)
-        assert result == Decimal("1.12400")
-
-    def test_get_volume_in_lots(self) -> None:
-        """Test get_volume_in_lots returns correct value."""
-        order = Order(
-            order_id=1,
-            symbol_id=1,
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            status=OrderStatus.ACCEPTED,
-            volume=100,  # 1 lot
-            time_in_force=TimeInForce.GOOD_TILL_CANCEL,
-            open_timestamp=datetime.now(UTC),
-        )
-        symbol = _create_symbol()
-
-        result = order.get_volume_in_lots(symbol)
-        assert result == Decimal("1")
-
-    def test_get_executed_volume_in_lots(self) -> None:
-        """Test get_executed_volume_in_lots returns correct value."""
-        order = Order(
-            order_id=1,
-            symbol_id=1,
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            status=OrderStatus.FILLED,
-            volume=100,
-            time_in_force=TimeInForce.GOOD_TILL_CANCEL,
-            open_timestamp=datetime.now(UTC),
-            executed_volume=50,  # 0.5 lots executed
-        )
-        symbol = _create_symbol()
-
-        result = order.get_executed_volume_in_lots(symbol)
-        assert result == Decimal("0.5")
 
 
 class TestOrderProperties:

@@ -19,7 +19,7 @@ Access via `client.accounts`.
 ```python
 account = await client.accounts.get_trader(account_id)
 
-print(f"Balance: {account.get_balance()}")
+print(f"Balance: {account.balance}")
 print(f"Leverage: {account.get_leverage()}")
 print(f"Account type: {account.account_type}")
 print(f"Broker name: {account.broker_name}")

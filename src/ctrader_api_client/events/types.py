@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from ..enums import ExecutionType, OrderSide
+from ..models import Trendbar
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,22 +19,20 @@ class SpotEvent:
 
     Emitted when bid/ask prices update for a subscribed symbol.
 
-    Note: Prices are raw integer values from the server. To convert to
-    actual prices, divide by 10^5 (e.g., 123000 = 1.23000). The exact
-    decimal places depend on symbol configuration.
-
     Attributes:
         account_id: The cTID trader account ID.
         symbol_id: The symbol identifier.
-        bid: Current bid price as raw integer, or None if unchanged.
-        ask: Current ask price as raw integer, or None if unchanged.
+        bid: Current bid price
+        ask: Current ask price
+        trendbar: Live trend bar. Only populated if subscribed to trendbar updates via MarketDataAPI.subscribe_trendbars
         timestamp: Server timestamp of the tick.
     """
 
     account_id: int
     symbol_id: int
-    bid: int | None
-    ask: int | None
+    bid: float | None
+    ask: float | None
+    trendbar: Trendbar | None
     timestamp: datetime
 
 

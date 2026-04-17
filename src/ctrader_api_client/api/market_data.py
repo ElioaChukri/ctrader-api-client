@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -177,7 +178,10 @@ class MarketDataAPI:
     ) -> None:
         """Subscribe to live trendbar (candle) updates.
 
-        After subscribing, trendbar events will be delivered via the event system.
+        Requires subscribing to spots for the same symbol beforehand.
+
+        After subscribing, trendbar data will be delivered via the event system inside the SpotEvent object.
+        Use `@client.on(SpotEvent)` to handle them.
 
         Args:
             account_id: The cTID trader account ID.
@@ -378,7 +382,7 @@ class MarketDataAPI:
         to_timestamp: datetime,
         quote_type: str = "BID",
         timeout: float | None = None,
-    ) -> list[TickData]:
+    ) -> Sequence[TickData]:
         """Get historical tick data.
 
         Args:
@@ -390,7 +394,7 @@ class MarketDataAPI:
             timeout: Request timeout (uses default if None).
 
         Returns:
-            List of TickData objects, ordered by timestamp ascending.
+            List of TickData objects, ordered by newest first.
 
         Note:
             Tick data can be voluminous. Use small time windows to avoid
@@ -421,4 +425,4 @@ class MarketDataAPI:
                 description=f"Expected ProtoOAGetTickDataRes, got {type(response).__name__}",
             )
 
-        return [TickData.from_proto(t) for t in response.tick_data]
+        return TickData.from_proto_list(response.tick_data)

@@ -85,11 +85,14 @@ await client.market_data.subscribe_spots(creds.account_id, [270])
 from ctrader_api_client.models import NewOrderRequest
 from ctrader_api_client.enums import OrderType, OrderSide
 
+# Get symbol info for volume conversion
+symbol = await client.symbols.get_by_id(creds.account_id, 270)
+
 request = NewOrderRequest(
     symbol_id=270,
     order_type=OrderType.MARKET,
     side=OrderSide.BUY,
-    volume=100,  # Volume in cents (100 = 0.01 lots)
+    volume=symbol.lots_to_volume(0.01),  # Convert 0.01 lots to volume
 )
 
 result = await client.trading.place_order(creds.account_id, request)
@@ -131,9 +134,6 @@ async def on_execution(event: ExecutionEvent):
     """Called when orders are executed."""
     print(f"Execution: {event.execution_type} for order {event.order_id}")
 
-    if event.is_closing_deal:
-        print(f"Position closed. Profit: {event.close_detail.get_net_profit()}")
-
 
 async def main():
     async with client:
@@ -145,12 +145,15 @@ async def main():
             expires_at=1778617423,
         )
 
+        # Get symbol for volume conversion
+        symbol = await client.symbols.get_by_id(creds.account_id, 270)
+
         # Place a test order
         order = NewOrderRequest(
             symbol_id=270,
             order_type=OrderType.MARKET,
             side=OrderSide.BUY,
-            volume=100,
+            volume=symbol.lots_to_volume(0.01),  # 0.01 lots
         )
         await client.trading.place_order(creds.account_id, order)
 
@@ -203,7 +206,7 @@ config = ClientConfig(
 
     # Timeouts
     heartbeat_interval=10.0,
-    heartbeat_timeout=30.0,  # Or 0 to disable server heartbeat checks
+    heartbeat_timeout=0,  # 0 to disable server heartbeat checks (default)
     request_timeout=30.0,
 
     # Reconnection

@@ -41,6 +41,26 @@ Using an unsupported filter raises `ValueError` at registration time.
     options:
       show_source: false
 
+**SpotEvent contains live trendbar data when subscribed:**
+
+```python
+from ctrader_api_client.enums import TrendbarPeriod
+
+# Subscribe to both spot prices and M1 trendbars
+await client.market_data.subscribe_spots(account_id, [270])
+await client.market_data.subscribe_trendbars(account_id, 270, TrendbarPeriod.M1)
+
+@client.on(SpotEvent, symbol_id=270)
+async def on_spot(event: SpotEvent):
+    # Prices are floats
+    print(f"Bid: {event.bid}, Ask: {event.ask}")
+
+    # Trendbar is included when subscribed
+    if event.trendbar:
+        bar = event.trendbar
+        print(f"Candle: O={bar.open} H={bar.high} L={bar.low} C={bar.close}")
+```
+
 ::: ctrader_api_client.events.DepthEvent
     options:
       show_source: false

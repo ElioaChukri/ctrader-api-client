@@ -170,7 +170,7 @@ class TestWrapMessage:
             pass
 
         with pytest.raises(UnknownPayloadTypeError):
-            wrap_message(FakeMessage())  # ty: ignore[invalid-argument-type]
+            wrap_message(FakeMessage())  # type: ignore[arg-type]
 
 
 class TestUnwrapMessage:
@@ -264,7 +264,7 @@ class TestRoundTrip:
     )
     def test_round_trip_preserves_message(self, message: object) -> None:
         """Various message types should survive wrap/unwrap round-trip."""
-        wrapped = wrap_message(message)  # ty: ignore[invalid-argument-type]
+        wrapped = wrap_message(message)  # type: ignore[arg-type]
         unwrapped = unwrap_message(wrapped)
 
         assert type(unwrapped) is type(message)

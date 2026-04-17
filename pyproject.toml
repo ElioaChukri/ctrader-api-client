@@ -1,6 +1,6 @@
 [project]
 name = "ctrader-api-client"
-version = "0.1.2"
+version = "0.2.0"
 description = "API Client to interact with the cTrader Open API spec"
 readme = "README.md"
 authors = [
@@ -33,7 +33,7 @@ dev = [
     "mkdocstrings[python]>=1.0.3",
     "pytest>=9.0.3",
     "ruff>=0.15.9",
-    "ty>=0.0.28",
+    "zuban>=0.7.0",
 ]
 
 [tool.ruff]
@@ -68,8 +68,7 @@ line-ending = "lf"
 skip-magic-trailing-comma = false
 docstring-code-format = true
 
-[[tool.ty.overrides]]
-include = ["tests/**"]
 
-[tool.ty.overrides.rules]
-invalid-assignment = "ignore"
+[[tool.mypy.overrides]]
+module = "tests.*"
+disable_error_code = ["method-assign"]

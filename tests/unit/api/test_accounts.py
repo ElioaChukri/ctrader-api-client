@@ -85,8 +85,7 @@ class TestGetTrader:
 
         assert account.account_id == 12345
         assert account.trader_login == 67890
-        assert account.balance == 100000
-        assert account.money_digits == 2
+        assert account.balance == 1000.0  # 100000 / 10^2
         assert account.leverage_in_cents == 10000
         assert account.account_type == AccountType.HEDGED
         assert account.access_rights == AccessRights.FULL_ACCESS

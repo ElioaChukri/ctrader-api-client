@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOATradingMode
@@ -115,42 +114,18 @@ class Symbol(FrozenModel):
     schedule_timezone: str = ""
     measurement_units: str = ""
 
-    def price_to_decimal(self, raw_price: int) -> Decimal:
-        """Convert raw price integer to Decimal.
-
-        Args:
-            raw_price: Raw price from API.
-
-        Returns:
-            Price as Decimal with correct precision.
-        """
-        return Decimal(raw_price) / Decimal(10**self.digits)
-
-    def decimal_to_price(self, price: Decimal) -> int:
-        """Convert Decimal price to raw integer.
-
-        Args:
-            price: Price as Decimal.
-
-        Returns:
-            Raw price integer for API.
-        """
-        return int(price * Decimal(10**self.digits))
-
-    @staticmethod
-    def volume_to_lots(volume_cents: int) -> Decimal:
+    def volume_to_lots(self, volume_cents: int) -> float:
         """Convert volume in cents to lots.
 
         Args:
-            volume_cents: Volume in cents (100 = 0.01 lots).
+            volume_cents: Volume in cents
 
         Returns:
             Volume in lots.
         """
-        return Decimal(volume_cents) / Decimal(100)
+        return volume_cents / self.lot_size
 
-    @staticmethod
-    def lots_to_volume(lots: Decimal) -> int:
+    def lots_to_volume(self, lots: float) -> int:
         """Convert lots to volume in cents.
 
         Args:
@@ -159,7 +134,7 @@ class Symbol(FrozenModel):
         Returns:
             Volume in cents for API.
         """
-        return int(lots * 100)
+        return int(lots * self.lot_size)
 
     @classmethod
     def from_proto(cls, proto: ProtoOASymbol) -> Symbol:

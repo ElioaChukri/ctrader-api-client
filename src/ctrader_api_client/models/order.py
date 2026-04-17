@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOAOrderStatus, ProtoOAOrderTriggerMethod, ProtoOAOrderType, ProtoOATimeInForce
@@ -11,7 +10,6 @@ from ._base import FrozenModel
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOAOrder
-    from .symbol import Symbol
 
 
 def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
@@ -131,67 +129,6 @@ class Order(FrozenModel):
     label: str = ""
     comment: str = ""
     last_update_timestamp: datetime | None = None
-
-    def get_limit_price(self, symbol: Symbol) -> Decimal | None:
-        """Get limit price as Decimal.
-
-        Args:
-            symbol: Symbol for price precision.
-
-        Returns:
-            Limit price, or None if not set.
-        """
-        if self.limit_price is None:
-            return None
-        return Decimal(str(self.limit_price)).quantize(Decimal(10) ** -symbol.digits)
-
-    def get_stop_price(self, symbol: Symbol) -> Decimal | None:
-        """Get stop trigger price as Decimal.
-
-        Args:
-            symbol: Symbol for price precision.
-
-        Returns:
-            Stop price, or None if not set.
-        """
-        if self.stop_price is None:
-            return None
-        return Decimal(str(self.stop_price)).quantize(Decimal(10) ** -symbol.digits)
-
-    def get_execution_price(self, symbol: Symbol) -> Decimal | None:
-        """Get average execution price as Decimal.
-
-        Args:
-            symbol: Symbol for price precision.
-
-        Returns:
-            Execution price, or None if not filled.
-        """
-        if self.execution_price is None:
-            return None
-        return Decimal(str(self.execution_price)).quantize(Decimal(10) ** -symbol.digits)
-
-    def get_volume_in_lots(self, symbol: Symbol) -> Decimal:
-        """Get order volume in lots.
-
-        Args:
-            symbol: Symbol for lot conversion.
-
-        Returns:
-            Volume in lots.
-        """
-        return symbol.volume_to_lots(self.volume)
-
-    def get_executed_volume_in_lots(self, symbol: Symbol) -> Decimal:
-        """Get executed volume in lots.
-
-        Args:
-            symbol: Symbol for lot conversion.
-
-        Returns:
-            Executed volume in lots.
-        """
-        return symbol.volume_to_lots(self.executed_volume)
 
     @property
     def is_pending(self) -> bool:

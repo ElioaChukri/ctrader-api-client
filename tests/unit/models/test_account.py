@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import AccessRights, AccountType
@@ -83,16 +82,15 @@ class TestAccount:
         proto.registration_timestamp = 1704067200000
         proto.max_leverage = 500
         proto.balance_version = 42
-        proto.manager_bonus = 1000
-        proto.ib_bonus = 500
-        proto.non_withdrawable_bonus = 250
+        proto.manager_bonus = 1000  # 10.00
+        proto.ib_bonus = 500  # 5.00
+        proto.non_withdrawable_bonus = 250  # 2.50
 
         account = Account.from_proto(proto)
 
         assert account.account_id == 12345
         assert account.trader_login == 67890
-        assert account.balance == 1000000
-        assert account.money_digits == 2
+        assert account.balance == 10000.0  # Divided by 10^2
         assert account.leverage_in_cents == 10000
         assert account.account_type == AccountType.HEDGED
         assert account.access_rights == AccessRights.FULL_ACCESS
@@ -103,9 +101,9 @@ class TestAccount:
         assert account.registration_timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
         assert account.max_leverage == 500
         assert account.balance_version == 42
-        assert account.manager_bonus == 1000
-        assert account.ib_bonus == 500
-        assert account.non_withdrawable_bonus == 250
+        assert account.manager_bonus == 10.0
+        assert account.ib_bonus == 5.0
+        assert account.non_withdrawable_bonus == 2.50
 
     def test_from_proto_maps_account_types(self) -> None:
         """Test that all account types are correctly mapped."""
@@ -170,13 +168,12 @@ class TestAccount:
             account = Account.from_proto(base_proto)
             assert account.access_rights == expected_rights
 
-    def test_get_balance_with_two_digits(self) -> None:
-        """Test get_balance with 2 decimal places."""
+    def test_balance_is_float(self) -> None:
+        """Test balance is directly accessible as float."""
         account = Account(
             account_id=1,
             trader_login=1,
-            balance=1234567,
-            money_digits=2,
+            balance=12345.67,
             leverage_in_cents=10000,
             account_type=AccountType.HEDGED,
             access_rights=AccessRights.FULL_ACCESS,
@@ -186,51 +183,14 @@ class TestAccount:
             is_limited_risk=False,
         )
 
-        assert account.get_balance() == Decimal("12345.67")
-
-    def test_get_balance_with_five_digits(self) -> None:
-        """Test get_balance with 5 decimal places."""
-        account = Account(
-            account_id=1,
-            trader_login=1,
-            balance=123456789,
-            money_digits=5,
-            leverage_in_cents=10000,
-            account_type=AccountType.HEDGED,
-            access_rights=AccessRights.FULL_ACCESS,
-            broker_name="Test",
-            deposit_asset_id=1,
-            swap_free=False,
-            is_limited_risk=False,
-        )
-
-        assert account.get_balance() == Decimal("1234.56789")
-
-    def test_get_balance_zero(self) -> None:
-        """Test get_balance with zero balance."""
-        account = Account(
-            account_id=1,
-            trader_login=1,
-            balance=0,
-            money_digits=2,
-            leverage_in_cents=10000,
-            account_type=AccountType.HEDGED,
-            access_rights=AccessRights.FULL_ACCESS,
-            broker_name="Test",
-            deposit_asset_id=1,
-            swap_free=False,
-            is_limited_risk=False,
-        )
-
-        assert account.get_balance() == Decimal("0")
+        assert account.balance == 12345.67
 
     def test_get_leverage_100(self) -> None:
         """Test get_leverage returns 1:100 for 10000 cents."""
         account = Account(
             account_id=1,
             trader_login=1,
-            balance=0,
-            money_digits=2,
+            balance=0.0,
             leverage_in_cents=10000,
             account_type=AccountType.HEDGED,
             access_rights=AccessRights.FULL_ACCESS,

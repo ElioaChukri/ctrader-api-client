@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import TradingMode
@@ -131,13 +130,13 @@ class TestSymbol:
             symbol = Symbol.from_proto(base_proto)
             assert symbol.trading_mode == expected_mode
 
-    def test_price_to_decimal_5_digits(self) -> None:
-        """Test price_to_decimal with 5 decimal places."""
+    def test_volume_to_lots_uses_lot_size(self) -> None:
+        """Test volume_to_lots uses symbol's lot_size."""
         symbol = Symbol(
             symbol_id=1,
             digits=5,
             pip_position=4,
-            lot_size=100000,
+            lot_size=100000,  # Standard forex lot
             min_volume=1000,
             max_volume=10000000,
             step_volume=1000,
@@ -146,36 +145,20 @@ class TestSymbol:
             swap_short=0.0,
         )
 
-        # 1.12345 represented as 112345
-        result = symbol.price_to_decimal(112345)
-        assert result == Decimal("1.12345")
+        # 100000 cents / 100000 lot_size = 1 lot
+        assert symbol.volume_to_lots(100000) == 1.0
+        # 10000 cents / 100000 lot_size = 0.1 lots
+        assert symbol.volume_to_lots(10000) == 0.1
+        # 1000 cents / 100000 lot_size = 0.01 lots
+        assert symbol.volume_to_lots(1000) == 0.01
 
-    def test_price_to_decimal_3_digits(self) -> None:
-        """Test price_to_decimal with 3 decimal places (JPY pairs)."""
-        symbol = Symbol(
-            symbol_id=1,
-            digits=3,
-            pip_position=2,
-            lot_size=100000,
-            min_volume=1000,
-            max_volume=10000000,
-            step_volume=1000,
-            trading_mode=TradingMode.ENABLED,
-            swap_long=0.0,
-            swap_short=0.0,
-        )
-
-        # 150.123 represented as 150123
-        result = symbol.price_to_decimal(150123)
-        assert result == Decimal("150.123")
-
-    def test_decimal_to_price_5_digits(self) -> None:
-        """Test decimal_to_price with 5 decimal places."""
+    def test_lots_to_volume_uses_lot_size(self) -> None:
+        """Test lots_to_volume uses symbol's lot_size."""
         symbol = Symbol(
             symbol_id=1,
             digits=5,
             pip_position=4,
-            lot_size=100000,
+            lot_size=100000,  # Standard forex lot
             min_volume=1000,
             max_volume=10000000,
             step_volume=1000,
@@ -184,80 +167,50 @@ class TestSymbol:
             swap_short=0.0,
         )
 
-        result = symbol.decimal_to_price(Decimal("1.12345"))
-        assert result == 112345
+        # 1 lot * 100000 lot_size = 100000 cents
+        assert symbol.lots_to_volume(1.0) == 100000
+        # 0.1 lots * 100000 lot_size = 10000 cents
+        assert symbol.lots_to_volume(0.1) == 10000
+        # 0.01 lots * 100000 lot_size = 1000 cents
+        assert symbol.lots_to_volume(0.01) == 1000
 
-    def test_decimal_to_price_3_digits(self) -> None:
-        """Test decimal_to_price with 3 decimal places."""
-        symbol = Symbol(
-            symbol_id=1,
-            digits=3,
-            pip_position=2,
-            lot_size=100000,
-            min_volume=1000,
-            max_volume=10000000,
-            step_volume=1000,
+    def test_volume_to_lots_different_lot_sizes(self) -> None:
+        """Test volume_to_lots with different lot sizes."""
+        # CFD with smaller lot size
+        cfd_symbol = Symbol(
+            symbol_id=2,
+            digits=2,
+            pip_position=0,
+            lot_size=100,  # Smaller lot size
+            min_volume=1,
+            max_volume=10000,
+            step_volume=1,
             trading_mode=TradingMode.ENABLED,
             swap_long=0.0,
             swap_short=0.0,
         )
 
-        result = symbol.decimal_to_price(Decimal("150.123"))
-        assert result == 150123
-
-    def test_volume_to_lots_full_lot(self) -> None:
-        """Test volume_to_lots for 1 full lot (100 cents)."""
-        result = Symbol.volume_to_lots(100)
-        assert result == Decimal("1")
-
-    def test_volume_to_lots_mini_lot(self) -> None:
-        """Test volume_to_lots for 0.1 lots (10 cents)."""
-        result = Symbol.volume_to_lots(10)
-        assert result == Decimal("0.1")
-
-    def test_volume_to_lots_micro_lot(self) -> None:
-        """Test volume_to_lots for 0.01 lots (1 cent)."""
-        result = Symbol.volume_to_lots(1)
-        assert result == Decimal("0.01")
-
-    def test_lots_to_volume_full_lot(self) -> None:
-        """Test lots_to_volume for 1 full lot."""
-        result = Symbol.lots_to_volume(Decimal("1"))
-        assert result == 100
-
-    def test_lots_to_volume_mini_lot(self) -> None:
-        """Test lots_to_volume for 0.1 lots."""
-        result = Symbol.lots_to_volume(Decimal("0.1"))
-        assert result == 10
-
-    def test_lots_to_volume_micro_lot(self) -> None:
-        """Test lots_to_volume for 0.01 lots."""
-        result = Symbol.lots_to_volume(Decimal("0.01"))
-        assert result == 1
-
-    def test_price_roundtrip(self) -> None:
-        """Test that price conversion is reversible."""
-        symbol = Symbol(
-            symbol_id=1,
-            digits=5,
-            pip_position=4,
-            lot_size=100000,
-            min_volume=1000,
-            max_volume=10000000,
-            step_volume=1000,
-            trading_mode=TradingMode.ENABLED,
-            swap_long=0.0,
-            swap_short=0.0,
-        )
-
-        original_price = Decimal("1.23456")
-        raw = symbol.decimal_to_price(original_price)
-        result = symbol.price_to_decimal(raw)
-        assert result == original_price
+        # 100 cents / 100 lot_size = 1 lot
+        assert cfd_symbol.volume_to_lots(100) == 1.0
+        # 50 cents / 100 lot_size = 0.5 lots
+        assert cfd_symbol.volume_to_lots(50) == 0.5
 
     def test_volume_roundtrip(self) -> None:
         """Test that volume conversion is reversible."""
-        original_lots = Decimal("0.5")
-        volume = Symbol.lots_to_volume(original_lots)
-        result = Symbol.volume_to_lots(volume)
+        symbol = Symbol(
+            symbol_id=1,
+            digits=5,
+            pip_position=4,
+            lot_size=100000,
+            min_volume=1000,
+            max_volume=10000000,
+            step_volume=1000,
+            trading_mode=TradingMode.ENABLED,
+            swap_long=0.0,
+            swap_short=0.0,
+        )
+
+        original_lots = 0.5
+        volume = symbol.lots_to_volume(original_lots)
+        result = symbol.volume_to_lots(volume)
         assert result == original_lots

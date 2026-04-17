@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOATrendbarPeriod
@@ -11,7 +11,6 @@ from ._base import FrozenModel
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOATickData, ProtoOATrendbar
-    from .symbol import Symbol
 
 
 _PERIOD_MAP: dict[int, TrendbarPeriod] = {
@@ -41,80 +40,20 @@ class Trendbar(FrozenModel):
     Attributes:
         timestamp: Bar open time.
         period: Bar period (M1, H1, D1, etc.).
-        low: Low price (raw integer).
-        open: Open price (raw integer).
-        high: High price (raw integer).
-        close: Close price (raw integer).
-        volume: Trade volume.
+        low: Low price
+        open: Open price
+        high: High price
+        close: Close price
+        volume: Bar volume in ticks.
     """
 
     timestamp: datetime
     period: TrendbarPeriod
-    low: int
-    open: int
-    high: int
-    close: int
+    open: float
+    high: float
+    low: float
+    close: float
     volume: int
-
-    def get_ohlc(self, symbol: Symbol) -> tuple[Decimal, Decimal, Decimal, Decimal]:
-        """Get OHLC prices as Decimals.
-
-        Args:
-            symbol: Symbol for price conversion.
-
-        Returns:
-            Tuple of (open, high, low, close) as Decimals.
-        """
-        return (
-            symbol.price_to_decimal(self.open),
-            symbol.price_to_decimal(self.high),
-            symbol.price_to_decimal(self.low),
-            symbol.price_to_decimal(self.close),
-        )
-
-    def get_open(self, symbol: Symbol) -> Decimal:
-        """Get open price as Decimal.
-
-        Args:
-            symbol: Symbol for price conversion.
-
-        Returns:
-            Open price.
-        """
-        return symbol.price_to_decimal(self.open)
-
-    def get_high(self, symbol: Symbol) -> Decimal:
-        """Get high price as Decimal.
-
-        Args:
-            symbol: Symbol for price conversion.
-
-        Returns:
-            High price.
-        """
-        return symbol.price_to_decimal(self.high)
-
-    def get_low(self, symbol: Symbol) -> Decimal:
-        """Get low price as Decimal.
-
-        Args:
-            symbol: Symbol for price conversion.
-
-        Returns:
-            Low price.
-        """
-        return symbol.price_to_decimal(self.low)
-
-    def get_close(self, symbol: Symbol) -> Decimal:
-        """Get close price as Decimal.
-
-        Args:
-            symbol: Symbol for price conversion.
-
-        Returns:
-            Close price.
-        """
-        return symbol.price_to_decimal(self.close)
 
     @classmethod
     def from_proto(cls, proto: ProtoOATrendbar) -> Trendbar:
@@ -140,10 +79,10 @@ class Trendbar(FrozenModel):
         return cls(
             timestamp=ts,
             period=_PERIOD_MAP.get(proto.period, TrendbarPeriod.M1),
-            low=low,
-            open=open_price,
-            high=high,
-            close=close,
+            low=low / 1e5,
+            open=open_price / 1e5,
+            high=high / 1e5,
+            close=close / 1e5,
             volume=proto.volume,
         )
 
@@ -155,38 +94,62 @@ class TickData(FrozenModel):
 
     Attributes:
         timestamp: Tick time.
-        price: Tick price (raw integer).
+        price: Tick price.
     """
 
     timestamp: datetime
-    price: int
-
-    def get_price(self, symbol: Symbol) -> Decimal:
-        """Get price as Decimal.
-
-        Args:
-            symbol: Symbol for price conversion.
-
-        Returns:
-            Price as Decimal.
-        """
-        return symbol.price_to_decimal(self.price)
+    price: float
 
     @classmethod
-    def from_proto(cls, proto: ProtoOATickData, base_timestamp_ms: int = 0) -> TickData:
+    def from_proto(cls, proto: ProtoOATickData) -> TickData:
         """Create TickData from proto message.
+
+        Note that price needs to be converted from a raw integer to a float by dividing by 1e5.
 
         Args:
             proto: The proto message.
-            base_timestamp_ms: Base timestamp in milliseconds. Proto timestamp
-                is a delta from this base.
 
         Returns:
             A new TickData instance.
         """
         # Proto timestamp is delta from base in milliseconds
-        actual_ts = base_timestamp_ms + proto.timestamp
         return cls(
-            timestamp=datetime.fromtimestamp(actual_ts / 1000, tz=UTC),
-            price=proto.tick,
+            timestamp=datetime.fromtimestamp(proto.timestamp / 1000, tz=UTC),
+            price=proto.tick / 1e5,
         )
+
+    @classmethod
+    def from_proto_list(cls, protos: list[ProtoOATickData]) -> Sequence[TickData]:
+        """Convert list of proto tick data to list of TickData.
+
+        Note that proto timestamps and prices are stored as deltas from the previous timestamp and price, with
+        the first data point being an absolute value.
+        This method converts them to absolute values.
+
+        Additionally, price needs to be converted from a raw integer to a float by dividing by 1e5.
+
+        Args:
+            protos: List of proto tick data messages.
+
+        Returns:
+            List of TickData instances.
+        """
+        if not protos:
+            return []
+
+        ticks = []
+        current_timestamp = 0
+        current_price = 0
+
+        for proto in protos:
+            current_timestamp += proto.timestamp
+            current_price += proto.tick
+
+            ticks.append(
+                cls(
+                    timestamp=datetime.fromtimestamp(current_timestamp / 1000, tz=UTC),
+                    price=current_price / 1e5,
+                )
+            )
+
+        return ticks

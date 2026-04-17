@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOAOrderTriggerMethod, ProtoOAPositionStatus
@@ -11,7 +10,6 @@ from ._base import FrozenModel
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOAPosition
-    from .symbol import Symbol
 
 
 def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
@@ -81,9 +79,9 @@ class Position(FrozenModel):
     stop_loss_trigger_method: StopTriggerMethod = StopTriggerMethod.TRADE
 
     # Financial
-    swap: int = 0
-    commission: int = 0
-    used_margin: int = 0
+    swap: float = 0
+    commission: float = 0
+    used_margin: float = 0
     margin_rate: float | None = None
 
     # Metadata
@@ -91,70 +89,6 @@ class Position(FrozenModel):
     comment: str = ""
     last_update_timestamp: datetime | None = None
     close_timestamp: datetime | None = None
-
-    def get_entry_price(self, symbol: Symbol) -> Decimal:
-        """Get entry price as Decimal.
-
-        Args:
-            symbol: Symbol for price precision.
-
-        Returns:
-            Entry price with correct decimal places.
-        """
-        return Decimal(str(self.entry_price)).quantize(Decimal(10) ** -symbol.digits)
-
-    def get_stop_loss(self, symbol: Symbol) -> Decimal | None:
-        """Get stop loss as Decimal.
-
-        Args:
-            symbol: Symbol for price precision.
-
-        Returns:
-            Stop loss price, or None if not set.
-        """
-        if self.stop_loss is None:
-            return None
-        return Decimal(str(self.stop_loss)).quantize(Decimal(10) ** -symbol.digits)
-
-    def get_take_profit(self, symbol: Symbol) -> Decimal | None:
-        """Get take profit as Decimal.
-
-        Args:
-            symbol: Symbol for price precision.
-
-        Returns:
-            Take profit price, or None if not set.
-        """
-        if self.take_profit is None:
-            return None
-        return Decimal(str(self.take_profit)).quantize(Decimal(10) ** -symbol.digits)
-
-    def get_swap(self) -> Decimal:
-        """Get accumulated swap as Decimal.
-
-        Returns:
-            Swap divided by 10^money_digits.
-        """
-        return Decimal(self.swap) / Decimal(10**self.money_digits)
-
-    def get_commission(self) -> Decimal:
-        """Get commission as Decimal.
-
-        Returns:
-            Commission divided by 10^money_digits.
-        """
-        return Decimal(self.commission) / Decimal(10**self.money_digits)
-
-    def get_volume_in_lots(self, symbol: Symbol) -> Decimal:
-        """Get volume in lots.
-
-        Args:
-            symbol: Symbol for lot conversion.
-
-        Returns:
-            Volume in lots.
-        """
-        return symbol.volume_to_lots(self.volume)
 
     @classmethod
     def from_proto(cls, proto: ProtoOAPosition) -> Position:
@@ -178,6 +112,9 @@ class Position(FrozenModel):
         if trade_data and trade_data.open_timestamp:
             open_ts = _timestamp_to_datetime(trade_data.open_timestamp)
 
+        money_digits = proto.money_digits if proto.money_digits else 2
+        divisor = 10**money_digits
+
         return cls(
             position_id=proto.position_id,
             symbol_id=trade_data.symbol_id if trade_data else 0,
@@ -192,9 +129,9 @@ class Position(FrozenModel):
             trailing_stop_loss=proto.trailing_stop_loss,
             guaranteed_stop_loss=proto.guaranteed_stop_loss,
             stop_loss_trigger_method=_TRIGGER_METHOD_MAP.get(proto.stop_loss_trigger_method, StopTriggerMethod.TRADE),
-            swap=proto.swap if proto.swap else 0,
-            commission=proto.commission if proto.commission else 0,
-            used_margin=proto.used_margin if proto.used_margin else 0,
+            swap=proto.swap / divisor if proto.swap else 0,
+            commission=proto.commission / divisor if proto.commission else 0,
+            used_margin=proto.used_margin / divisor if proto.used_margin else 0,
             margin_rate=proto.margin_rate if proto.margin_rate else None,
             label=trade_data.label if trade_data else "",
             comment=trade_data.comment if trade_data else "",

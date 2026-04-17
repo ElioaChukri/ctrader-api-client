@@ -41,6 +41,7 @@ client = CTraderClient(config)
 
 @client.on(SpotEvent, symbol_id=270)  # Filter by symbol
 async def on_price(event: SpotEvent):
+    # bid and ask are floats
     print(f"Price update: {event.bid}/{event.ask}")
 
 

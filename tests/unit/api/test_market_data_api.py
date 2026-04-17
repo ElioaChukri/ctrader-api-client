@@ -202,7 +202,7 @@ class TestGetTrendbars:
         bars = await api.get_trendbars(12345, 270, TrendbarPeriod.H1, from_ts, to_ts)
 
         assert len(bars) == 2
-        assert bars[0].low == 112000
+        assert bars[0].low == 1.12  # 112000 / 1e5
         assert bars[0].volume == 1000
 
     @pytest.mark.anyio

@@ -3,27 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from unittest.mock import MagicMock
 
-from ctrader_api_client.enums import TradingMode, TrendbarPeriod
-from ctrader_api_client.models import Symbol, TickData, Trendbar
-
-
-def _create_symbol(digits: int = 5) -> Symbol:
-    """Create a Symbol for testing."""
-    return Symbol(
-        symbol_id=1,
-        digits=digits,
-        pip_position=4,
-        lot_size=100000,
-        min_volume=1000,
-        max_volume=10000000,
-        step_volume=1000,
-        trading_mode=TradingMode.ENABLED,
-        swap_long=0.0,
-        swap_short=0.0,
-    )
+from ctrader_api_client.enums import TrendbarPeriod
+from ctrader_api_client.models import TickData, Trendbar
 
 
 class TestTrendbarFromProto:
@@ -34,7 +17,7 @@ class TestTrendbarFromProto:
         proto = MagicMock()
         proto.utc_timestamp_in_minutes = 28401120  # 2024-01-01 00:00:00 UTC in minutes
         proto.period = 1  # M1
-        proto.low = 112300  # 1.12300
+        proto.low = 112300  # 1.12300 raw
         proto.delta_open = 20  # open = low + 20 = 112320
         proto.delta_high = 50  # high = low + 50 = 112350
         proto.delta_close = 35  # close = low + 35 = 112335
@@ -42,10 +25,11 @@ class TestTrendbarFromProto:
 
         bar = Trendbar.from_proto(proto)
 
-        assert bar.low == 112300
-        assert bar.open == 112320
-        assert bar.high == 112350
-        assert bar.close == 112335
+        # Values are now floats, divided by 1e5
+        assert bar.low == 1.123
+        assert bar.open == 1.1232
+        assert bar.high == 1.1235
+        assert bar.close == 1.12335
         assert bar.volume == 1000
         assert bar.period == TrendbarPeriod.M1
 
@@ -98,168 +82,78 @@ class TestTrendbarFromProto:
         assert bar.timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
 
 
-class TestTrendbarHelpers:
-    """Tests for Trendbar helper methods."""
+class TestTrendbarValues:
+    """Tests for Trendbar direct value access."""
 
-    def test_get_ohlc(self) -> None:
-        """Test get_ohlc returns correct tuple of Decimals."""
+    def test_ohlc_values_as_floats(self) -> None:
+        """Test OHLC values are directly accessible as floats."""
         bar = Trendbar(
             timestamp=datetime.now(UTC),
             period=TrendbarPeriod.M1,
-            low=112300,
-            open=112320,
-            high=112350,
-            close=112335,
+            low=1.12300,
+            open=1.12320,
+            high=1.12350,
+            close=1.12335,
             volume=1000,
         )
-        symbol = _create_symbol(digits=5)
 
-        o, h, l, c = bar.get_ohlc(symbol)
-
-        assert o == Decimal("1.12320")
-        assert h == Decimal("1.12350")
-        assert l == Decimal("1.12300")
-        assert c == Decimal("1.12335")
-
-    def test_get_open(self) -> None:
-        """Test get_open returns correct Decimal."""
-        bar = Trendbar(
-            timestamp=datetime.now(UTC),
-            period=TrendbarPeriod.M1,
-            low=112300,
-            open=112320,
-            high=112350,
-            close=112335,
-            volume=1000,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = bar.get_open(symbol)
-        assert result == Decimal("1.12320")
-
-    def test_get_high(self) -> None:
-        """Test get_high returns correct Decimal."""
-        bar = Trendbar(
-            timestamp=datetime.now(UTC),
-            period=TrendbarPeriod.M1,
-            low=112300,
-            open=112320,
-            high=112350,
-            close=112335,
-            volume=1000,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = bar.get_high(symbol)
-        assert result == Decimal("1.12350")
-
-    def test_get_low(self) -> None:
-        """Test get_low returns correct Decimal."""
-        bar = Trendbar(
-            timestamp=datetime.now(UTC),
-            period=TrendbarPeriod.M1,
-            low=112300,
-            open=112320,
-            high=112350,
-            close=112335,
-            volume=1000,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = bar.get_low(symbol)
-        assert result == Decimal("1.12300")
-
-    def test_get_close(self) -> None:
-        """Test get_close returns correct Decimal."""
-        bar = Trendbar(
-            timestamp=datetime.now(UTC),
-            period=TrendbarPeriod.M1,
-            low=112300,
-            open=112320,
-            high=112350,
-            close=112335,
-            volume=1000,
-        )
-        symbol = _create_symbol(digits=5)
-
-        result = bar.get_close(symbol)
-        assert result == Decimal("1.12335")
-
-    def test_ohlc_with_jpy_pair(self) -> None:
-        """Test OHLC conversion for JPY pairs (3 digits)."""
-        bar = Trendbar(
-            timestamp=datetime.now(UTC),
-            period=TrendbarPeriod.H1,
-            low=150123,  # 150.123
-            open=150145,
-            high=150200,
-            close=150180,
-            volume=5000,
-        )
-        symbol = _create_symbol(digits=3)
-
-        o, h, low, c = bar.get_ohlc(symbol)
-
-        assert o == Decimal("150.145")
-        assert h == Decimal("150.200")
-        assert low == Decimal("150.123")
-        assert c == Decimal("150.180")
+        assert bar.open == 1.12320
+        assert bar.high == 1.12350
+        assert bar.low == 1.12300
+        assert bar.close == 1.12335
 
 
 class TestTickDataFromProto:
     """Tests for TickData.from_proto method."""
 
-    def test_from_proto_with_base_timestamp(self) -> None:
-        """Test that from_proto correctly computes timestamp from base."""
+    def test_from_proto_converts_price(self) -> None:
+        """Test that from_proto correctly converts price."""
         proto = MagicMock()
-        proto.timestamp = 500  # 500ms delta
-        proto.tick = 112345
+        proto.timestamp = 1704067200000  # 2024-01-01 00:00:00 UTC in ms
+        proto.tick = 112345  # 1.12345 raw
 
-        # Base: 2024-01-01 00:00:00 UTC in ms
-        base_ts = 1704067200000
+        tick = TickData.from_proto(proto)
 
-        tick = TickData.from_proto(proto, base_timestamp_ms=base_ts)
-
-        assert tick.price == 112345
-        # 1704067200000 + 500 = 1704067200500
-        expected_ts = datetime.fromtimestamp(1704067200.500, tz=UTC)
-        assert tick.timestamp == expected_ts
-
-    def test_from_proto_zero_delta(self) -> None:
-        """Test that from_proto handles zero delta."""
-        proto = MagicMock()
-        proto.timestamp = 0
-        proto.tick = 112345
-
-        base_ts = 1704067200000
-
-        tick = TickData.from_proto(proto, base_timestamp_ms=base_ts)
-
+        assert tick.price == 1.12345
         expected_ts = datetime.fromtimestamp(1704067200.0, tz=UTC)
         assert tick.timestamp == expected_ts
 
 
-class TestTickDataHelpers:
-    """Tests for TickData helper methods."""
+class TestTickDataFromProtoList:
+    """Tests for TickData.from_proto_list method."""
 
-    def test_get_price(self) -> None:
-        """Test get_price returns correct Decimal."""
-        tick = TickData(
-            timestamp=datetime.now(UTC),
-            price=112345,  # 1.12345
-        )
-        symbol = _create_symbol(digits=5)
+    def test_from_proto_list_handles_delta_encoding(self) -> None:
+        """Test that from_proto_list correctly handles delta encoding."""
+        # Create mock protos with delta-encoded timestamps and prices
+        proto1 = MagicMock()
+        proto1.timestamp = 1704067200000  # First is absolute
+        proto1.tick = 112345  # First is absolute
 
-        result = tick.get_price(symbol)
-        assert result == Decimal("1.12345")
+        proto2 = MagicMock()
+        proto2.timestamp = 1000  # +1 second delta
+        proto2.tick = 10  # +10 price delta
 
-    def test_get_price_jpy_pair(self) -> None:
-        """Test get_price for JPY pairs."""
-        tick = TickData(
-            timestamp=datetime.now(UTC),
-            price=150123,  # 150.123
-        )
-        symbol = _create_symbol(digits=3)
+        proto3 = MagicMock()
+        proto3.timestamp = 500  # +0.5 second delta
+        proto3.tick = -5  # -5 price delta
 
-        result = tick.get_price(symbol)
-        assert result == Decimal("150.123")
+        ticks = TickData.from_proto_list([proto1, proto2, proto3])
+
+        assert len(ticks) == 3
+
+        # First tick: absolute values
+        assert ticks[0].price == 1.12345
+        assert ticks[0].timestamp == datetime.fromtimestamp(1704067200.0, tz=UTC)
+
+        # Second tick: first + delta
+        assert ticks[1].price == 1.12355  # 112345 + 10 = 112355 / 1e5
+        assert ticks[1].timestamp == datetime.fromtimestamp(1704067201.0, tz=UTC)
+
+        # Third tick: second + delta
+        assert ticks[2].price == 1.1235  # 112355 - 5 = 112350 / 1e5
+        assert ticks[2].timestamp == datetime.fromtimestamp(1704067201.5, tz=UTC)
+
+    def test_from_proto_list_empty(self) -> None:
+        """Test that from_proto_list handles empty list."""
+        ticks = TickData.from_proto_list([])
+        assert ticks == []

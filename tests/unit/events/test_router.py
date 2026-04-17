@@ -100,9 +100,10 @@ class TestSpotEventConversion:
         proto = MagicMock()
         proto.ctid_trader_account_id = 123
         proto.symbol_id = 1
-        proto.bid = 123000
+        proto.bid = 123000  # Raw value, will be divided by 1e5
         proto.ask = 123050
         proto.timestamp = 1609459200000  # 2021-01-01 00:00:00 UTC
+        proto.trendbar = []  # No trendbar
 
         # Call handler directly
         await router._handle_spot(proto)
@@ -111,8 +112,9 @@ class TestSpotEventConversion:
         event = received_events[0]
         assert event.account_id == 123
         assert event.symbol_id == 1
-        assert event.bid == 123000
-        assert event.ask == 123050
+        assert event.bid == 1.23  # 123000 / 1e5
+        assert event.ask == 1.2305  # 123050 / 1e5
+        assert event.trendbar is None
         assert event.timestamp == datetime(2021, 1, 1, 0, 0, 0, tzinfo=UTC)
 
     @pytest.mark.anyio
@@ -132,12 +134,14 @@ class TestSpotEventConversion:
         proto.bid = 0  # Zero means None
         proto.ask = 0
         proto.timestamp = 0
+        proto.trendbar = []
 
         await router._handle_spot(proto)
 
         assert len(received_events) == 1
         assert received_events[0].bid is None
         assert received_events[0].ask is None
+        assert received_events[0].trendbar is None
 
 
 class TestExecutionEventConversion:

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ctrader_api_client.enums import OrderSide, OrderType, StopTriggerMethod, TimeInForce
-
 from .._internal.proto import (
     ProtoOAAmendOrderReq,
     ProtoOAAmendPositionSLTPReq,
@@ -15,6 +13,7 @@ from .._internal.proto import (
     ProtoOATimeInForce,
     ProtoOATradeSide,
 )
+from ..enums import OrderSide, OrderType, StopTriggerMethod, TimeInForce
 from ._base import FrozenModel
 
 
@@ -51,7 +50,7 @@ class NewOrderRequest(FrozenModel):
     Attributes:
         symbol_id: Symbol to trade.
         side: Order direction (BUY/SELL).
-        volume: Volume in cents (100 = 0.01 lots).
+        volume: Volume in cents. Will yield lots = volume / symbol.lot_size
         order_type: Type of order.
         limit_price: Limit price for LIMIT/STOP_LIMIT orders.
         stop_price: Stop trigger price for STOP/STOP_LIMIT orders.
@@ -65,10 +64,10 @@ class NewOrderRequest(FrozenModel):
         comment: User-defined comment (max 256 chars).
         base_slippage_price: Base price for slippage calculation.
         slippage_in_points: Max allowed slippage.
-        trailing_stop_loss: Enable trailing stop loss.
         guaranteed_stop_loss: Enable guaranteed stop loss.
-        relative_stop_loss: Stop loss distance in points.
-        relative_take_profit: Take profit distance in points.
+        relative_stop_loss: Stop loss distance in price units.
+        relative_take_profit: Take profit distance in price units.
+        trailing_stop_loss: Enable trailing stop loss.
         stop_trigger_method: How to trigger stop orders.
     """
 
@@ -100,8 +99,8 @@ class NewOrderRequest(FrozenModel):
     slippage_in_points: int | None = None
 
     # Relative SL/TP
-    relative_stop_loss: int | None = None
-    relative_take_profit: int | None = None
+    relative_stop_loss: float | None = None
+    relative_take_profit: float | None = None
 
     # Flags
     trailing_stop_loss: bool = False
@@ -146,11 +145,11 @@ class NewOrderRequest(FrozenModel):
             label=self.label,
             position_id=self.position_id or 0,
             client_order_id=self.client_order_id,
-            relative_stop_loss=self.relative_stop_loss or 0,
-            relative_take_profit=self.relative_take_profit or 0,
+            relative_stop_loss=int(self.relative_stop_loss * 1e5) if self.relative_stop_loss else 0,
+            relative_take_profit=int(self.relative_take_profit * 1e5) if self.relative_take_profit else 0,
             guaranteed_stop_loss=self.guaranteed_stop_loss,
             trailing_stop_loss=self.trailing_stop_loss,
-            stop_trigger_method=trigger_method,  # ty: ignore[invalid-argument-type]
+            stop_trigger_method=trigger_method,  # type: ignore[arg-type]
         )
 
 
@@ -170,8 +169,8 @@ class AmendOrderRequest(FrozenModel):
         slippage_in_points: New max slippage.
         trailing_stop_loss: Enable/disable trailing stop.
         guaranteed_stop_loss: Enable/disable guaranteed stop.
-        relative_stop_loss: New relative stop loss in points.
-        relative_take_profit: New relative take profit in points.
+        relative_stop_loss: New relative stop loss in price units.
+        relative_take_profit: New relative take profit in price units.
         stop_trigger_method: New trigger method.
     """
 
@@ -187,8 +186,8 @@ class AmendOrderRequest(FrozenModel):
     slippage_in_points: int | None = None
     trailing_stop_loss: bool | None = None
     guaranteed_stop_loss: bool | None = None
-    relative_stop_loss: int | None = None
-    relative_take_profit: int | None = None
+    relative_stop_loss: float | None = None
+    relative_take_profit: float | None = None
     stop_trigger_method: StopTriggerMethod | None = None
 
     def to_proto(self, account_id: int) -> ProtoOAAmendOrderReq:
@@ -216,8 +215,8 @@ class AmendOrderRequest(FrozenModel):
             stop_loss=self.stop_loss or 0.0,
             take_profit=self.take_profit or 0.0,
             slippage_in_points=self.slippage_in_points or 0,
-            relative_stop_loss=self.relative_stop_loss or 0,
-            relative_take_profit=self.relative_take_profit or 0,
+            relative_stop_loss=int(self.relative_stop_loss * 1e5) if self.relative_stop_loss else 0,
+            relative_take_profit=int(self.relative_take_profit * 1e5) if self.relative_take_profit else 0,
             guaranteed_stop_loss=self.guaranteed_stop_loss if self.guaranteed_stop_loss is not None else False,
             trailing_stop_loss=self.trailing_stop_loss if self.trailing_stop_loss is not None else False,
             stop_trigger_method=trigger_method,
