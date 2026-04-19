@@ -372,7 +372,7 @@ class MarketDataAPI:
                 description=f"Expected ProtoOAGetTrendbarsRes, got {type(response).__name__}",
             )
 
-        return [Trendbar.from_proto(t) for t in response.trendbar]
+        return [Trendbar.from_proto(t, historical=True) for t in response.trendbar]
 
     async def get_tick_data(
         self,

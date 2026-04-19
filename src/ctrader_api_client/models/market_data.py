@@ -56,17 +56,15 @@ class Trendbar(FrozenModel):
     volume: int
 
     @classmethod
-    def from_proto(cls, proto: ProtoOATrendbar, bid_price: float | None = None) -> Trendbar:
-        """Create Trendbar from proto message.
+    def from_proto(cls, proto: ProtoOATrendbar, bid_price: float | None = None, historical: bool = False) -> Trendbar:
+        """Create a Trendbar from a proto message.
 
         Args:
-            proto: The proto message.
-            bid_price: Optional bid price to use for specifying the close price since the API never provides delta_close
-                 on live trendbar updates.
-
-        Returns:
-            A new Trendbar instance.
+            proto: Source proto message.
+            bid_price: Bid price used as close when the API omits delta_close on live updates.
+            historical: If False, raises on delta_close == 0 instead of silently returning low == close.
         """
+
         # Calculate timestamp from utc_timestamp_in_minutes
         ts = datetime.now(UTC)
         if proto.utc_timestamp_in_minutes:
@@ -80,9 +78,11 @@ class Trendbar(FrozenModel):
         if bid_price is not None:
             close = bid_price
         else:
-            if proto.delta_close == 0:
-                # If delta_close is 0, it means the API did not provide a close price (e.g. for live updates).
+            if not historical and proto.delta_close == 0:
+                # If delta_close is 0 on a live bar, it means the API did not provide a close price.
                 # In this case, we must raise instead of silently returning an incorrect close price.
+                # If historical is True, we allow delta_close to be 0 since historical bars can have a close price equal
+                # to the low price.
                 raise RuntimeError(
                     "delta_close missing from Trendbar proto and no bid_price was provided to use as fallback."
                     "Returning error as this is safer than silently returning an incorrect close price of low + 0."
