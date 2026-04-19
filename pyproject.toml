@@ -1,6 +1,6 @@
 [project]
 name = "ctrader-api-client"
-version = "0.2.1"
+version = "0.2.2"
 description = "API Client to interact with the cTrader Open API spec"
 readme = "README.md"
 authors = [
