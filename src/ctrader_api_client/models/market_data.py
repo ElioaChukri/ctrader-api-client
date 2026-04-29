@@ -85,7 +85,7 @@ class Trendbar(FrozenModel):
                 # to the low price.
                 raise RuntimeError(
                     "delta_close missing from Trendbar proto and no bid_price was provided to use as fallback."
-                    "Returning error as this is safer than silently returning an incorrect close price of low + 0."
+                    " Returning error as this is safer than silently returning an incorrect close price of low + 0."
                 )
             close = low + proto.delta_close
 

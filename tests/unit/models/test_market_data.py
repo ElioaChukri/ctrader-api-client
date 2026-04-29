@@ -62,7 +62,7 @@ class TestTrendbarFromProto:
 
         for proto_value, expected_period in test_cases:
             proto.period = proto_value
-            bar = Trendbar.from_proto(proto)
+            bar = Trendbar.from_proto(proto, bid_price=10)
             assert bar.period == expected_period
 
     def test_from_proto_converts_timestamp(self) -> None:
@@ -77,7 +77,7 @@ class TestTrendbarFromProto:
         proto.delta_close = 0
         proto.volume = 1000
 
-        bar = Trendbar.from_proto(proto)
+        bar = Trendbar.from_proto(proto, bid_price=10)
 
         assert bar.timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
 
