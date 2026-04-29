@@ -15,6 +15,7 @@ ci directory='':
     @just lint {{directory}}
     @just fmt {{directory}}
     @just type-check {{directory}}
+    @just test {{directory}}
 
 # Lint the codebase using ruff, optionally specifying a directory to lint.
 lint directory='':
