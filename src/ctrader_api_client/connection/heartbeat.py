@@ -5,6 +5,7 @@ import time
 
 import anyio
 import anyio.abc
+import betterproto
 
 from .._internal.proto import ProtoHeartbeatEvent
 from .protocol import Protocol
@@ -43,10 +44,11 @@ class HeartbeatManager:
     async def start(self) -> None:
         """Start heartbeat monitoring.
 
-        Registers an event handler for incoming heartbeats and starts
-        the heartbeat send loop.
+        Registers event handlers and starts the heartbeat send loop.
         """
-        # Register handler for incoming heartbeats
+        # Track activity on any server message, not just heartbeats
+        self._protocol.on_event(betterproto.Message, self._record_activity)
+        # Keep heartbeat handler for debug logging
         self._protocol.on_event(ProtoHeartbeatEvent, self._on_heartbeat)
         self._last_received = time.monotonic()
 
@@ -58,7 +60,7 @@ class HeartbeatManager:
     async def stop(self) -> None:
         """Stop heartbeat monitoring.
 
-        Cancels the heartbeat loop and removes the event handler.
+        Cancels the heartbeat loop and removes event handlers.
         """
         if self._task_scope is not None:
             self._task_scope.cancel()
@@ -71,6 +73,7 @@ class HeartbeatManager:
                 pass
             self._task_group = None
 
+        self._protocol.remove_handler(betterproto.Message, self._record_activity)
         self._protocol.remove_handler(ProtoHeartbeatEvent, self._on_heartbeat)
 
     async def restart(self) -> None:
@@ -83,13 +86,12 @@ class HeartbeatManager:
         if self._task_group is not None:
             self._task_group.start_soon(self._heartbeat_loop)
 
-    async def _on_heartbeat(self, _event: ProtoHeartbeatEvent) -> None:
-        """Handler called when heartbeat received from server.
-
-        Args:
-            _event: The heartbeat event from the server (unused).
-        """
+    async def _record_activity(self, _message: betterproto.Message) -> None:
+        """Reset the inactivity timer on any received server message."""
         self._last_received = time.monotonic()
+
+    async def _on_heartbeat(self, _event: ProtoHeartbeatEvent) -> None:
+        """Handler called when an explicit heartbeat is received from the server."""
         logger.debug("Heartbeat received from server")
 
     async def _heartbeat_loop(self) -> None:

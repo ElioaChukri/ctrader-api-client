@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import anyio
+import betterproto
 import pytest
 
 from ctrader_api_client._internal.proto import (
@@ -347,6 +348,28 @@ class TestMessageDispatch:
         await protocol._dispatch_message(proto_msg, inner)
 
         assert len(received) == 1
+
+    @pytest.mark.anyio
+    async def test_dispatch_triggers_base_class_handler(self, mock_transport: MagicMock) -> None:
+        protocol = Protocol(mock_transport)
+
+        received: list[betterproto.Message] = []
+
+        async def catch_all(message: betterproto.Message) -> None:
+            received.append(message)
+
+        protocol.on_event(betterproto.Message, catch_all)
+
+        proto_msg = ProtoMessage(
+            payload_type=ProtoPayloadType.HEARTBEAT_EVENT,
+            client_msg_id="",
+        )
+        inner = ProtoHeartbeatEvent()
+
+        await protocol._dispatch_message(proto_msg, inner)
+
+        assert len(received) == 1
+        assert isinstance(received[0], ProtoHeartbeatEvent)
 
 
 class TestReconnect:

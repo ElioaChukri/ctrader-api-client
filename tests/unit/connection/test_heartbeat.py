@@ -6,9 +6,10 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 import anyio
+import betterproto
 import pytest
 
-from ctrader_api_client._internal.proto import ProtoHeartbeatEvent
+from ctrader_api_client._internal.proto import ProtoHeartbeatEvent, ProtoOAVersionRes
 from ctrader_api_client.connection.heartbeat import HeartbeatManager
 from ctrader_api_client.connection.protocol import Protocol
 
@@ -55,10 +56,10 @@ class TestHeartbeatStart:
         await heartbeat.start()
 
         try:
-            # Check that on_event was called with ProtoHeartbeatEvent
-            mock_protocol.on_event.assert_called_once()
-            call_args = mock_protocol.on_event.call_args
-            assert call_args[0][0] is ProtoHeartbeatEvent
+            assert mock_protocol.on_event.call_count == 2
+            registered_types = [call[0][0] for call in mock_protocol.on_event.call_args_list]
+            assert betterproto.Message in registered_types
+            assert ProtoHeartbeatEvent in registered_types
         finally:
             await heartbeat.stop()
 
@@ -86,9 +87,10 @@ class TestHeartbeatStop:
         await heartbeat.start()
         await heartbeat.stop()
 
-        mock_protocol.remove_handler.assert_called_once()
-        call_args = mock_protocol.remove_handler.call_args
-        assert call_args[0][0] is ProtoHeartbeatEvent
+        assert mock_protocol.remove_handler.call_count == 2
+        removed_types = [call[0][0] for call in mock_protocol.remove_handler.call_args_list]
+        assert betterproto.Message in removed_types
+        assert ProtoHeartbeatEvent in removed_types
 
     @pytest.mark.anyio
     async def test_stop_cancels_loop(self, mock_protocol: MagicMock) -> None:
@@ -105,15 +107,26 @@ class TestHeartbeatReceived:
     """Tests for heartbeat event handling."""
 
     @pytest.mark.anyio
-    async def test_heartbeat_updates_last_received(self, mock_protocol: MagicMock) -> None:
+    async def test_record_activity_updates_last_received(self, mock_protocol: MagicMock) -> None:
         heartbeat = HeartbeatManager(mock_protocol)
 
         initial_time = time.monotonic() - 100  # Set to past
         heartbeat._last_received = initial_time
 
-        await heartbeat._on_heartbeat(ProtoHeartbeatEvent())
+        await heartbeat._record_activity(ProtoHeartbeatEvent())
 
         assert heartbeat._last_received > initial_time
+
+    @pytest.mark.anyio
+    async def test_on_heartbeat_does_not_update_last_received(self, mock_protocol: MagicMock) -> None:
+        heartbeat = HeartbeatManager(mock_protocol)
+
+        initial_time = time.monotonic() - 100
+        heartbeat._last_received = initial_time
+
+        await heartbeat._on_heartbeat(ProtoHeartbeatEvent())
+
+        assert heartbeat._last_received == initial_time
 
 
 class TestHeartbeatSend:
@@ -163,15 +176,28 @@ class TestHeartbeatTimeout:
         await heartbeat.start()
 
         try:
-            # Simulate receiving heartbeats
             for _ in range(3):
                 await anyio.sleep(0.03)
-                await heartbeat._on_heartbeat(ProtoHeartbeatEvent())
+                await heartbeat._record_activity(ProtoHeartbeatEvent())
         finally:
             await heartbeat.stop()
 
-        # Disconnect should not have been triggered
-        mock_protocol._handle_disconnect.assert_not_called()
+        mock_protocol.handle_disconnect.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_no_timeout_when_non_heartbeat_messages_received(self, mock_protocol: MagicMock) -> None:
+        heartbeat = HeartbeatManager(mock_protocol, interval=0.02, timeout=0.1)
+
+        await heartbeat.start()
+
+        try:
+            for _ in range(3):
+                await anyio.sleep(0.03)
+                await heartbeat._record_activity(ProtoOAVersionRes())
+        finally:
+            await heartbeat.stop()
+
+        mock_protocol.handle_disconnect.assert_not_called()
 
 
 class TestHeartbeatSendFailure:

@@ -276,17 +276,20 @@ class Protocol:
 
         Handlers are spawned as concurrent tasks to prevent deadlocks if
         handlers perform some blocking I/O calls that require responses from the reader loop.
+        Walks the MRO so handlers registered for a base class (e.g. betterproto.Message)
+        are also called for all subclass messages.
 
         Args:
             message: The event message to dispatch.
         """
-        handlers = self._event_handlers.get(type(message), [])
-        for handler in handlers:
-            if self._task_group is not None:
-                self._task_group.start_soon(self._call_handler_safe, handler, message)
-            else:
-                # Fallback if task group not available (shouldn't happen in normal operation)
-                await self._call_handler_safe(handler, message)
+        for cls in type(message).__mro__:
+            handlers = self._event_handlers.get(cls, [])
+            for handler in handlers:
+                if self._task_group is not None:
+                    self._task_group.start_soon(self._call_handler_safe, handler, message)
+                else:
+                    # Fallback if task group not available (shouldn't happen in normal operation)
+                    await self._call_handler_safe(handler, message)
 
     @staticmethod
     async def _call_handler_safe(
