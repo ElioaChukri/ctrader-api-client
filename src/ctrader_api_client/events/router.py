@@ -139,7 +139,7 @@ class EventRouter:
         self._protocol.on_event(ProtoOAv1PnLChangeEvent, self._handle_pnl_change)
 
         self._started = True
-        logger.debug("Event router started")
+        logger.info("Event router started")
 
     def stop(self) -> None:
         """Idempotent. Unregister all proto event handlers."""
@@ -176,7 +176,7 @@ class EventRouter:
         self._protocol.remove_handler(ProtoOAv1PnLChangeEvent, self._handle_pnl_change)
 
         self._started = False
-        logger.debug("Event router stopped")
+        logger.info("Event router stopped")
 
     # -------------------------------------------------------------------------
     # Proto to Event Converters
@@ -240,6 +240,10 @@ class EventRouter:
             is_server_event=proto.is_server_event if proto.is_server_event else False,
             error_code=proto.error_code if proto.error_code else None,
         )
+        if proto.execution_type in (ProtoOAExecutionType.ORDER_FILLED, ProtoOAExecutionType.ORDER_REJECTED):
+            logger.debug("Execution: %s account=%d order=%d", exec_type.name, event.account_id, event.order_id)
+        else:
+            logger.debug("Execution: %s account=%d order=%d", exec_type.name, event.account_id, event.order_id)
         await self._emitter.emit(event)
 
     async def _handle_order_error(self, proto: ProtoOAOrderErrorEvent) -> None:
@@ -250,6 +254,13 @@ class EventRouter:
             position_id=proto.position_id if proto.position_id else None,
             error_code=proto.error_code,
             description=proto.description or "",
+        )
+        logger.warning(
+            "Order error: account=%d order=%s error=%s: %s",
+            event.account_id,
+            event.order_id,
+            event.error_code,
+            event.description,
         )
         await self._emitter.emit(event)
 
@@ -319,6 +330,7 @@ class EventRouter:
             account_ids=tuple(proto.ctid_trader_account_ids),
             reason=proto.reason or "Unknown",
         )
+        logger.warning("Access token invalidated for accounts: %s", list(event.account_ids))
         await self._emitter.emit(event)
 
     async def _handle_client_disconnect(
@@ -329,6 +341,7 @@ class EventRouter:
         event = ClientDisconnectEvent(
             reason=proto.reason or "Unknown",
         )
+        logger.warning("Client disconnected by server: %s", event.reason)
         await self._emitter.emit(event)
 
     async def _handle_account_disconnect(
@@ -339,6 +352,7 @@ class EventRouter:
         event = AccountDisconnectEvent(
             account_id=proto.ctid_trader_account_id,
         )
+        logger.warning("Account %d disconnected by server", event.account_id)
         await self._emitter.emit(event)
 
     async def _handle_symbol_changed(
@@ -377,6 +391,7 @@ class EventRouter:
             margin_call_type=margin_call.margin_call_type,
             margin_level_threshold=Decimal(str(margin_call.margin_level_threshold)),
         )
+        logger.error("Margin call triggered: account=%d type=%s", event.account_id, event.margin_call_type)
         await self._emitter.emit(event)
 
     async def _handle_pnl_change(

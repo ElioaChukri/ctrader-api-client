@@ -235,9 +235,14 @@ class Protocol:
                     proto_msg = deserialize_proto_message(raw)
                     inner = unwrap_message(proto_msg)
                     await self._dispatch_message(proto_msg, inner)
-                except (FramingError, anyio.ClosedResourceError, anyio.EndOfStream):
-                    # Connection closed or corrupted
+                except FramingError as e:
+                    logger.error("Protocol framing error (possible data corruption): %s", e)
                     if self._running:
+                        await self.handle_disconnect()
+                    break
+                except (anyio.ClosedResourceError, anyio.EndOfStream):
+                    if self._running:
+                        logger.debug("Connection closed by remote")
                         await self.handle_disconnect()
                     break
                 except anyio.get_cancelled_exc_class():

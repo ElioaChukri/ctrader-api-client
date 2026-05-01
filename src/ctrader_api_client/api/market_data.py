@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -31,6 +32,9 @@ from ..models import TickData, Trendbar
 
 if TYPE_CHECKING:
     from ..connection import Protocol
+
+
+logger = logging.getLogger(__name__)
 
 
 # Map TrendbarPeriod enum to proto values
@@ -115,6 +119,7 @@ class MarketDataAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Subscribing to spots: account=%d symbols=%s", account_id, symbol_ids)
         request = ProtoOASubscribeSpotsReq(
             ctid_trader_account_id=account_id,
             symbol_id=symbol_ids,
@@ -149,6 +154,7 @@ class MarketDataAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Unsubscribing from spots: account=%d symbols=%s", account_id, symbol_ids)
         request = ProtoOAUnsubscribeSpotsReq(
             ctid_trader_account_id=account_id,
             symbol_id=symbol_ids,
@@ -193,6 +199,7 @@ class MarketDataAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Subscribing to trendbars: account=%d symbol=%d period=%s", account_id, symbol_id, period.name)
         request = ProtoOASubscribeLiveTrendbarReq(
             ctid_trader_account_id=account_id,
             symbol_id=symbol_id,
@@ -229,6 +236,7 @@ class MarketDataAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Unsubscribing from trendbars: account=%d symbol=%d period=%s", account_id, symbol_id, period.name)
         request = ProtoOAUnsubscribeLiveTrendbarReq(
             ctid_trader_account_id=account_id,
             symbol_id=symbol_id,
@@ -270,6 +278,7 @@ class MarketDataAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Subscribing to depth: account=%d symbols=%s", account_id, symbol_ids)
         request = ProtoOASubscribeDepthQuotesReq(
             ctid_trader_account_id=account_id,
             symbol_id=symbol_ids,
@@ -303,6 +312,7 @@ class MarketDataAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Unsubscribing from depth: account=%d symbols=%s", account_id, symbol_ids)
         request = ProtoOAUnsubscribeDepthQuotesReq(
             ctid_trader_account_id=account_id,
             symbol_id=symbol_ids,

@@ -56,6 +56,7 @@ class HeartbeatManager:
         self._task_group = anyio.create_task_group()
         await self._task_group.__aenter__()
         self._task_group.start_soon(self._heartbeat_loop)
+        logger.info("Heartbeat monitor started (interval=%.1fs, timeout=%.1fs)", self._interval, self._timeout)
 
     async def stop(self) -> None:
         """Stop heartbeat monitoring.
@@ -66,6 +67,7 @@ class HeartbeatManager:
             self._task_scope.cancel()
 
         if self._task_group is not None:
+            logger.info("Heartbeat monitor stopped")
             self._task_group.cancel_scope.cancel()
             try:
                 await self._task_group.__aexit__(None, None, None)
@@ -85,6 +87,7 @@ class HeartbeatManager:
         self._last_received = time.monotonic()
         if self._task_group is not None:
             self._task_group.start_soon(self._heartbeat_loop)
+        logger.info("Heartbeat monitor restarted")
 
     async def _record_activity(self, _message: betterproto.Message) -> None:
         """Reset the inactivity timer on any received server message."""

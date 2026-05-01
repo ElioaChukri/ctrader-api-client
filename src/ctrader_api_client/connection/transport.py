@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import ssl
 
 import anyio
 from anyio.abc import ByteReceiveStream, ByteStream
 
 from ..exceptions import CTraderConnectionClosedError, CTraderConnectionFailedError
+
+
+logger = logging.getLogger(__name__)
 
 
 class Transport:
@@ -78,6 +82,11 @@ class Transport:
         except OSError as e:
             raise CTraderConnectionFailedError(self._host, self._port, e) from e
 
+        if self._ssl:
+            logger.info("Connected to %s:%d with SSL", self._host, self._port)
+        else:
+            logger.warning("Connected to %s:%d without SSL (plaintext)", self._host, self._port)
+
     async def close(self) -> None:
         """Close the connection gracefully.
 
@@ -91,8 +100,10 @@ class Transport:
                 # move_on_after guards against aclose() hanging when the network
                 # route has changed (e.g. VPN toggle) but the OS hasn't reset the
                 # TCP socket — graceful TLS shutdown would wait forever for an ACK.
-                with anyio.move_on_after(5):
+                with anyio.move_on_after(5) as close_scope:
                     await stream.aclose()
+                if close_scope.cancelled_caught:
+                    logger.debug("Graceful TLS shutdown timed out, forcing close")
             except (OSError, anyio.ClosedResourceError):
                 pass
 

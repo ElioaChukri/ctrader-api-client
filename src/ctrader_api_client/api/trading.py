@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -34,6 +35,9 @@ from ..models.requests import (
 
 if TYPE_CHECKING:
     from ..connection import Protocol
+
+
+logger = logging.getLogger(__name__)
 
 
 def _raise_if_order_error(response: object) -> None:
@@ -217,6 +221,13 @@ class TradingAPI:
             APIError: If request fails.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug(
+            "Placing order: account=%d symbol=%d type=%s volume=%d",
+            account_id,
+            request.symbol_id,
+            request.order_type.name,
+            request.volume,
+        )
         proto_request = request.to_proto(account_id)
 
         response = await self._protocol.send_request(
@@ -254,6 +265,7 @@ class TradingAPI:
             APIError: If request fails or order not found.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Amending order: account=%d order=%d", account_id, request.order_id)
         proto_request = request.to_proto(account_id)
 
         response = await self._protocol.send_request(
@@ -291,6 +303,7 @@ class TradingAPI:
             APIError: If request fails or order not found.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Cancelling order: account=%d order=%d", account_id, order_id)
         request = ProtoOACancelOrderReq(
             ctid_trader_account_id=account_id,
             order_id=order_id,
@@ -331,6 +344,7 @@ class TradingAPI:
             APIError: If request fails or position not found.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Closing position: account=%d position=%d", account_id, request.position_id)
         proto_request = request.to_proto(account_id)
 
         response = await self._protocol.send_request(
@@ -368,6 +382,7 @@ class TradingAPI:
             APIError: If request fails or position not found.
             CTraderConnectionTimeoutError: If request times out.
         """
+        logger.debug("Amending position: account=%d position=%d", account_id, request.position_id)
         proto_request = request.to_proto(account_id)
 
         response = await self._protocol.send_request(
