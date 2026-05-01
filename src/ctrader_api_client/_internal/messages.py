@@ -100,11 +100,6 @@ from .proto import (
     ProtoOAUnsubscribeLiveTrendbarRes,
     ProtoOAUnsubscribeSpotsReq,
     ProtoOAUnsubscribeSpotsRes,
-    ProtoOAv1PnLChangeEvent,
-    ProtoOAv1PnLChangeSubscribeReq,
-    ProtoOAv1PnLChangeSubscribeRes,
-    ProtoOAv1PnLChangeUnSubscribeReq,
-    ProtoOAv1PnLChangeUnSubscribeRes,
     ProtoOAVersionReq,
     ProtoOAVersionRes,
     ProtoPayloadType,
@@ -207,11 +202,6 @@ _PAYLOAD_TYPE_TO_CLASS: dict[int, type[betterproto.Message]] = {
     ProtoOAPayloadType.PROTO_OA_DEAL_OFFSET_LIST_RES: ProtoOADealOffsetListRes,
     ProtoOAPayloadType.PROTO_OA_GET_POSITION_UNREALIZED_PNL_REQ: ProtoOAGetPositionUnrealizedPnLReq,
     ProtoOAPayloadType.PROTO_OA_GET_POSITION_UNREALIZED_PNL_RES: ProtoOAGetPositionUnrealizedPnLRes,
-    ProtoOAPayloadType.PROTO_OA_V1_PNL_CHANGE_EVENT: ProtoOAv1PnLChangeEvent,
-    ProtoOAPayloadType.PROTO_OA_V1_PNL_CHANGE_SUBSCRIBE_REQ: ProtoOAv1PnLChangeSubscribeReq,
-    ProtoOAPayloadType.PROTO_OA_V1_PNL_CHANGE_SUBSCRIBE_RES: ProtoOAv1PnLChangeSubscribeRes,
-    ProtoOAPayloadType.PROTO_OA_V1_PNL_CHANGE_UN_SUBSCRIBE_REQ: ProtoOAv1PnLChangeUnSubscribeReq,
-    ProtoOAPayloadType.PROTO_OA_V1_PNL_CHANGE_UN_SUBSCRIBE_RES: ProtoOAv1PnLChangeUnSubscribeRes,
 }
 
 

@@ -18,8 +18,6 @@ from .._internal.proto import (
     ProtoOAOrderListRes,
     ProtoOAReconcileReq,
     ProtoOAReconcileRes,
-    ProtoOAv1PnLChangeSubscribeReq,
-    ProtoOAv1PnLChangeSubscribeRes,
 )
 from ..enums import ExecutionType, OrderSide
 from ..events import ExecutionEvent
@@ -167,31 +165,6 @@ class TradingAPI:
         """
         self._protocol = protocol
         self._default_timeout = default_timeout
-
-    async def subscribe_to_pnl_changes(self, account_id: int) -> None:
-        """Subscribe to PnL change events.
-
-        After subscribing, PnL change data will be delivered via the event system.
-        Use `@client.on(PnLChangeEvent)` to handle them.
-
-        Note:
-            This subscription seems to be currently rate-limited by cTrader, so it may not work as expected.
-
-        Args:
-            account_id: The cTID trader account ID.
-        """
-        request = ProtoOAv1PnLChangeSubscribeReq(ctid_trader_account_id=account_id)
-
-        response = await self._protocol.send_request(
-            request,
-            timeout=self._default_timeout,
-        )
-
-        if not isinstance(response, ProtoOAv1PnLChangeSubscribeRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAv1PnLChangeSubscribeRes, got {type(response).__name__}",
-            )
 
     async def place_order(
         self,

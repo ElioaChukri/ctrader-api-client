@@ -263,26 +263,6 @@ class MarginCallTriggerEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class PnLChangeEvent:
-    """Unrealized PnL change event.
-
-    Emitted when unrealized profit/loss changes due to market movement.
-    Requires subscription via ProtoOAv1PnLChangeSubscribeReq.
-
-    Attributes:
-        account_id: The cTID trader account ID.
-        gross_unrealized_pnl: Gross unrealized PnL (raw, divide by 10^moneyDigits).
-        net_unrealized_pnl: Net unrealized PnL (raw, divide by 10^moneyDigits).
-        money_digits: Exponent for monetary values.
-    """
-
-    account_id: int
-    gross_unrealized_pnl: int
-    net_unrealized_pnl: int
-    money_digits: int
-
-
-@dataclass(frozen=True, slots=True)
 class ReconnectedEvent:
     """Emitted after automatic reconnection and re-authentication.
 
@@ -333,7 +313,6 @@ type Event = (
     | SymbolChangedEvent
     | TrailingStopChangedEvent
     | MarginCallTriggerEvent
-    | PnLChangeEvent
     | ReconnectedEvent
     | ReadyEvent
 )

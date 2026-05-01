@@ -17,7 +17,6 @@ from ctrader_api_client.events.types import (
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    PnLChangeEvent,
     SpotEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
@@ -558,36 +557,6 @@ class TestMarginCallTriggerEventConversion:
         assert event.account_id == 123
         assert event.margin_call_type == 1
         assert event.margin_level_threshold == Decimal("50.0")
-
-
-class TestPnLChangeEventConversion:
-    """Tests for PnLChangeEvent conversion."""
-
-    @pytest.mark.anyio
-    async def test_pnl_change_event_conversion(self, router: EventRouter, emitter: EventEmitter) -> None:
-        """Test that ProtoOAv1PnLChangeEvent is converted correctly."""
-        received_events: list[PnLChangeEvent] = []
-
-        async def handler(event: PnLChangeEvent) -> None:
-            received_events.append(event)
-
-        emitter.subscribe(PnLChangeEvent, handler)
-        router.start()
-
-        proto = MagicMock()
-        proto.ctid_trader_account_id = 123
-        proto.gross_unrealized_pn_l = 100000000
-        proto.net_unrealized_pn_l = 95000000
-        proto.money_digits = 8
-
-        await router._handle_pnl_change(proto)
-
-        assert len(received_events) == 1
-        event = received_events[0]
-        assert event.account_id == 123
-        assert event.gross_unrealized_pnl == 100000000
-        assert event.net_unrealized_pnl == 95000000
-        assert event.money_digits == 8
 
 
 class TestTimestampConversion:

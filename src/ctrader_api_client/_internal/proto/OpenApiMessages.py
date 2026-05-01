@@ -850,7 +850,7 @@ class ProtoOAAccountLogoutReq(betterproto.Message):
 @dataclass
 class ProtoOAAccountLogoutRes(betterproto.Message):
     """
-    * Response to the ProtoOATraderLogoutReq request. Actual logout of trading
+    * Response to the ProtoOAAccountLogoutReq request. Actual logout of trading
     account will be completed on ProtoOAAccountDisconnectEvent.
     """
 
@@ -1060,53 +1060,3 @@ class ProtoOAGetPositionUnrealizedPnLRes(betterproto.Message):
     ctid_trader_account_id: int = betterproto.int64_field(2)
     position_unrealized_pn_l: list["ProtoOAPositionUnrealizedPnL"] = betterproto.message_field(3)
     money_digits: int = betterproto.uint32_field(4)
-
-
-@dataclass
-class ProtoOAv1PnLChangeEvent(betterproto.Message):
-    """
-    The event that is sent when the unrealized PnL is changed due to market
-    movement. Requires subscribing to PnL events, see
-    ProtoOAv1PnLChangeSubscribeReq
-    """
-
-    payload_type: "ProtoOAPayloadType" = betterproto.enum_field(1)
-    ctid_trader_account_id: int = betterproto.int64_field(2)
-    gross_unrealized_pn_l: int = betterproto.int64_field(3)
-    net_unrealized_pn_l: int = betterproto.int64_field(4)
-    money_digits: int = betterproto.uint32_field(5)
-
-
-@dataclass
-class ProtoOAv1PnLChangeSubscribeReq(betterproto.Message):
-    """The request to subscribe to ProtoOAv1PnLChangeEvent"""
-
-    payload_type: "ProtoOAPayloadType" = betterproto.enum_field(1)
-    ctid_trader_account_id: int = betterproto.int64_field(2)
-
-
-@dataclass
-class ProtoOAv1PnLChangeSubscribeRes(betterproto.Message):
-    """The response for ProtoOAv1PnLChangeSubscribeReq"""
-
-    payload_type: "ProtoOAPayloadType" = betterproto.enum_field(1)
-    ctid_trader_account_id: int = betterproto.int64_field(2)
-
-
-@dataclass
-class ProtoOAv1PnLChangeUnSubscribeReq(betterproto.Message):
-    """
-    The request to stop an existing subscription to PnL events. The subscriber
-    who sends this request will stop receiving ProtoOAv1PnLChangeEvent
-    """
-
-    payload_type: "ProtoOAPayloadType" = betterproto.enum_field(1)
-    ctid_trader_account_id: int = betterproto.int64_field(2)
-
-
-@dataclass
-class ProtoOAv1PnLChangeUnSubscribeRes(betterproto.Message):
-    """The response for ProtoOAv1PnLChangeUnSubscribeReq"""
-
-    payload_type: "ProtoOAPayloadType" = betterproto.enum_field(1)
-    ctid_trader_account_id: int = betterproto.int64_field(2)

@@ -97,11 +97,6 @@ from .OpenApiMessages import (
     ProtoOAUnsubscribeLiveTrendbarRes,
     ProtoOAUnsubscribeSpotsReq,
     ProtoOAUnsubscribeSpotsRes,
-    ProtoOAv1PnLChangeEvent,
-    ProtoOAv1PnLChangeSubscribeReq,
-    ProtoOAv1PnLChangeSubscribeRes,
-    ProtoOAv1PnLChangeUnSubscribeReq,
-    ProtoOAv1PnLChangeUnSubscribeRes,
     ProtoOAVersionReq,
     ProtoOAVersionRes,
 )
@@ -311,10 +306,5 @@ __all__ = [
     "ProtoOAUnsubscribeSpotsRes",
     "ProtoOAVersionReq",
     "ProtoOAVersionRes",
-    "ProtoOAv1PnLChangeEvent",
-    "ProtoOAv1PnLChangeSubscribeReq",
-    "ProtoOAv1PnLChangeSubscribeRes",
-    "ProtoOAv1PnLChangeUnSubscribeReq",
-    "ProtoOAv1PnLChangeUnSubscribeRes",
     "ProtoPayloadType",
 ]

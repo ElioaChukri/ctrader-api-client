@@ -19,7 +19,6 @@ from .events import (
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    PnLChangeEvent,
     ReadyEvent,
     ReconnectedEvent,
     SpotEvent,
@@ -50,7 +49,6 @@ T_AccountIdOnly = TypeVar(
     SymbolChangedEvent,
     TrailingStopChangedEvent,
     MarginCallTriggerEvent,
-    PnLChangeEvent,
 )
 
 # Events that support no filters

@@ -108,10 +108,6 @@ async def on_ready(event: ReadyEvent):
     options:
       show_source: false
 
-::: ctrader_api_client.events.PnLChangeEvent
-    options:
-      show_source: false
-
 ::: ctrader_api_client.events.TrailingStopChangedEvent
     options:
       show_source: false

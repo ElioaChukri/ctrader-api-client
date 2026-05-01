@@ -15,7 +15,6 @@ from ctrader_api_client.events.types import (
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    PnLChangeEvent,
     SpotEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
@@ -319,21 +318,3 @@ class TestMarginCallTriggerEvent:
         assert event.account_id == 123
         assert event.margin_call_type == 1
         assert event.margin_level_threshold == Decimal("50.0")
-
-
-class TestPnLChangeEvent:
-    """Tests for PnLChangeEvent dataclass."""
-
-    def test_pnl_change_event_creation(self) -> None:
-        """Test basic PnLChangeEvent creation."""
-        event = PnLChangeEvent(
-            account_id=123,
-            gross_unrealized_pnl=100000000,
-            net_unrealized_pnl=95000000,
-            money_digits=8,
-        )
-
-        assert event.account_id == 123
-        assert event.gross_unrealized_pnl == 100000000
-        assert event.net_unrealized_pnl == 95000000
-        assert event.money_digits == 8

@@ -19,7 +19,6 @@ from .._internal.proto import (
     ProtoOASymbolChangedEvent,
     ProtoOATraderUpdatedEvent,
     ProtoOATrailingSLChangedEvent,
-    ProtoOAv1PnLChangeEvent,
 )
 from ..enums import ExecutionType, OrderSide
 from ..models import Trendbar
@@ -33,7 +32,6 @@ from .types import (
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
-    PnLChangeEvent,
     SpotEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
@@ -136,7 +134,6 @@ class EventRouter:
             ProtoOAMarginCallTriggerEvent,
             self._handle_margin_call_trigger,
         )
-        self._protocol.on_event(ProtoOAv1PnLChangeEvent, self._handle_pnl_change)
 
         self._started = True
         logger.info("Event router started")
@@ -173,7 +170,6 @@ class EventRouter:
             ProtoOAMarginCallTriggerEvent,
             self._handle_margin_call_trigger,
         )
-        self._protocol.remove_handler(ProtoOAv1PnLChangeEvent, self._handle_pnl_change)
 
         self._started = False
         logger.info("Event router stopped")
@@ -392,19 +388,6 @@ class EventRouter:
             margin_level_threshold=Decimal(str(margin_call.margin_level_threshold)),
         )
         logger.error("Margin call triggered: account=%d type=%s", event.account_id, event.margin_call_type)
-        await self._emitter.emit(event)
-
-    async def _handle_pnl_change(
-        self,
-        proto: ProtoOAv1PnLChangeEvent,
-    ) -> None:
-        """Convert ProtoOAv1PnLChangeEvent to PnLChangeEvent."""
-        event = PnLChangeEvent(
-            account_id=proto.ctid_trader_account_id,
-            gross_unrealized_pnl=proto.gross_unrealized_pn_l,
-            net_unrealized_pnl=proto.net_unrealized_pn_l,
-            money_digits=proto.money_digits if proto.money_digits else 2,
-        )
         await self._emitter.emit(event)
 
     # -------------------------------------------------------------------------

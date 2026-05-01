@@ -96,11 +96,6 @@ class ProtoOAPayloadType(betterproto.Enum):
     PROTO_OA_DEAL_OFFSET_LIST_RES = 2186
     PROTO_OA_GET_POSITION_UNREALIZED_PNL_REQ = 2187
     PROTO_OA_GET_POSITION_UNREALIZED_PNL_RES = 2188
-    PROTO_OA_V1_PNL_CHANGE_EVENT = 2189
-    PROTO_OA_V1_PNL_CHANGE_SUBSCRIBE_REQ = 2190
-    PROTO_OA_V1_PNL_CHANGE_SUBSCRIBE_RES = 2191
-    PROTO_OA_V1_PNL_CHANGE_UN_SUBSCRIBE_REQ = 2192
-    PROTO_OA_V1_PNL_CHANGE_UN_SUBSCRIBE_RES = 2193
 
 
 class ProtoOADayOfWeek(betterproto.Enum):
@@ -227,7 +222,7 @@ class ProtoOAOrderStatus(betterproto.Enum):
 
 
 class ProtoOAOrderTriggerMethod(betterproto.Enum):
-    """* Stop Order and Stop Lost triggering method ENUM."""
+    """* Stop Order and Stop Loss triggering method ENUM."""
 
     TRADE = 1
     OPPOSITE = 2
@@ -406,7 +401,6 @@ class ProtoOAErrorCode(betterproto.Enum):
     UNABLE_TO_CANCEL_ORDER = 134
     UNABLE_TO_AMEND_ORDER = 135
     SHORT_SELLING_NOT_ALLOWED = 136
-    NOT_SUBSCRIBED_TO_PNL = 137
 
 
 class ProtoOALimitedRiskMarginCalculationStrategy(betterproto.Enum):

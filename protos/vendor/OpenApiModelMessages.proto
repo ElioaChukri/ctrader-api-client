@@ -100,11 +100,6 @@ enum ProtoOAPayloadType {
     PROTO_OA_DEAL_OFFSET_LIST_RES = 2186;
     PROTO_OA_GET_POSITION_UNREALIZED_PNL_REQ = 2187;
     PROTO_OA_GET_POSITION_UNREALIZED_PNL_RES = 2188;
-    PROTO_OA_V1_PNL_CHANGE_EVENT = 2189;
-    PROTO_OA_V1_PNL_CHANGE_SUBSCRIBE_REQ = 2190;
-    PROTO_OA_V1_PNL_CHANGE_SUBSCRIBE_RES = 2191;
-    PROTO_OA_V1_PNL_CHANGE_UN_SUBSCRIBE_REQ = 2192;
-    PROTO_OA_V1_PNL_CHANGE_UN_SUBSCRIBE_RES = 2193;
 }
 
 /** Asset entity. */
@@ -328,7 +323,7 @@ enum ProtoOAOrderStatus {
     ORDER_STATUS_CANCELLED = 5; // Order is cancelled. Might be valid for orders with partially filled volume that were cancelled by LP.
 }
 
-/** Stop Order and Stop Lost triggering method ENUM. */
+/** Stop Order and Stop Loss triggering method ENUM. */
 enum ProtoOAOrderTriggerMethod {
     TRADE = 1; // Stop Order: buy is triggered by ask, sell by bid; Stop Loss Order: for buy position is triggered by bid and for sell position by ask.
     OPPOSITE = 2; // Stop Order: buy is triggered by bid, sell by ask; Stop Loss Order: for buy position is triggered by ask and for sell position by bid.
@@ -687,7 +682,6 @@ enum ProtoOAErrorCode {
     UNABLE_TO_CANCEL_ORDER = 134; // Unable to cancel order.
     UNABLE_TO_AMEND_ORDER = 135; // Unable to amend order.
     SHORT_SELLING_NOT_ALLOWED = 136; // Short selling is not allowed.
-    NOT_SUBSCRIBED_TO_PNL = 137;//This session is not subscribed via ProtoOAv1PnLChangeSubscribeReq
 }
 
 enum ProtoOALimitedRiskMarginCalculationStrategy {
