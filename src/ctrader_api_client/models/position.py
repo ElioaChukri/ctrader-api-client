@@ -144,3 +144,18 @@ class Position(FrozenModel):
                 else None
             ),
         )
+
+
+class PositionUnrealizedPnL(FrozenModel):
+    """
+    Unrealized P&L for a single open position.
+
+    Attributes:
+        position_id: Unique identifier for the position.
+        gross_unrealized_pnl: Gross unrealized profit or loss.
+        net_unrealized_pnl: Net unrealized profit or loss after fees and swap.
+    """
+
+    position_id: int
+    gross_unrealized_pnl: float
+    net_unrealized_pnl: float

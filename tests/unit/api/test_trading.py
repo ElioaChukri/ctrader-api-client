@@ -15,6 +15,8 @@ from ctrader_api_client._internal.proto import (
     ProtoOADealStatus,
     ProtoOAExecutionEvent,
     ProtoOAExecutionType,
+    ProtoOAGetPositionUnrealizedPnLReq,
+    ProtoOAGetPositionUnrealizedPnLRes,
     ProtoOAOrder,
     ProtoOAOrderListReq,
     ProtoOAOrderListRes,
@@ -22,6 +24,7 @@ from ctrader_api_client._internal.proto import (
     ProtoOAOrderType,
     ProtoOAPosition,
     ProtoOAPositionStatus,
+    ProtoOAPositionUnrealizedPnL,
     ProtoOAReconcileReq,
     ProtoOAReconcileRes,
     ProtoOATimeInForce,
@@ -31,7 +34,88 @@ from ctrader_api_client._internal.proto import (
 from ctrader_api_client.api import TradingAPI
 from ctrader_api_client.enums import ExecutionType, OrderSide, OrderType
 from ctrader_api_client.exceptions import APIError
-from ctrader_api_client.models import NewOrderRequest
+from ctrader_api_client.models import NewOrderRequest, PositionUnrealizedPnL
+
+
+class TestGetUnrealizedPnlPerPosition:
+    """Test TradingAPI.get_unrealized_pnl_per_position()."""
+
+    @pytest.fixture
+    def pnl_response(self) -> ProtoOAGetPositionUnrealizedPnLRes:
+        return ProtoOAGetPositionUnrealizedPnLRes(
+            ctid_trader_account_id=12345,
+            money_digits=2,
+            position_unrealized_pn_l=[
+                ProtoOAPositionUnrealizedPnL(
+                    position_id=200,
+                    gross_unrealized_pn_l=1500,
+                    net_unrealized_pn_l=1200,
+                ),
+                ProtoOAPositionUnrealizedPnL(
+                    position_id=201,
+                    gross_unrealized_pn_l=-500,
+                    net_unrealized_pn_l=-600,
+                ),
+            ],
+        )
+
+    @pytest.mark.anyio
+    async def test_sends_correct_request(
+        self,
+        mock_protocol: MagicMock,
+        pnl_response: ProtoOAGetPositionUnrealizedPnLRes,
+    ):
+        mock_protocol.send_request.return_value = pnl_response
+        api = TradingAPI(mock_protocol)
+
+        await api.get_unrealized_pnl_per_position(12345)
+
+        mock_protocol.send_request.assert_called_once()
+        request = mock_protocol.send_request.call_args[0][0]
+        assert isinstance(request, ProtoOAGetPositionUnrealizedPnLReq)
+        assert request.ctid_trader_account_id == 12345
+
+    @pytest.mark.anyio
+    async def test_applies_money_digits_divisor(
+        self,
+        mock_protocol: MagicMock,
+        pnl_response: ProtoOAGetPositionUnrealizedPnLRes,
+    ):
+        mock_protocol.send_request.return_value = pnl_response
+        api = TradingAPI(mock_protocol)
+
+        result = await api.get_unrealized_pnl_per_position(12345)
+
+        assert len(result) == 2
+        assert result[0].position_id == 200
+        assert result[0].gross_unrealized_pnl == 15.0
+        assert result[0].net_unrealized_pnl == 12.0
+        assert result[1].position_id == 201
+        assert result[1].gross_unrealized_pnl == -5.0
+        assert result[1].net_unrealized_pnl == -6.0
+
+    @pytest.mark.anyio
+    async def test_returns_list_of_position_unrealized_pnl(
+        self,
+        mock_protocol: MagicMock,
+        pnl_response: ProtoOAGetPositionUnrealizedPnLRes,
+    ):
+        mock_protocol.send_request.return_value = pnl_response
+        api = TradingAPI(mock_protocol)
+
+        result = await api.get_unrealized_pnl_per_position(12345)
+
+        assert all(isinstance(item, PositionUnrealizedPnL) for item in result)
+
+    @pytest.mark.anyio
+    async def test_raises_on_unexpected_response(self, mock_protocol: MagicMock):
+        mock_protocol.send_request.return_value = MagicMock()
+        api = TradingAPI(mock_protocol)
+
+        with pytest.raises(APIError) as exc_info:
+            await api.get_unrealized_pnl_per_position(12345)
+
+        assert exc_info.value.error_code == "UNEXPECTED_RESPONSE"
 
 
 class TestTradingAPIInit:

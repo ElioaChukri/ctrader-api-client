@@ -102,6 +102,9 @@ partial_close = ClosePositionRequest(
     options:
       show_source: false
 
+::: ctrader_api_client.models.PositionUnrealizedPnL
+    options:
+      show_source: false
 
 ::: ctrader_api_client.models.Order
     options:

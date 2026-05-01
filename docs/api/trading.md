@@ -10,6 +10,7 @@ Access via `client.trading`.
     options:
       show_source: false
       members:
+        - get_unrealized_pnl_per_position
         - place_order
         - amend_order
         - cancel_order
@@ -174,4 +175,13 @@ for deal in deals:
     # Check if this deal closed a position
     if deal.is_closing_deal and deal.close_detail:
         print(f"  Gross P/L: {deal.close_detail.gross_profit}")
+```
+
+### Get PnL for all open positions
+
+```python
+unrealized_pnl = await client.trading.get_unrealized_pnl_per_position(account_id)
+
+for p in unrealized_pnl:
+    print(f"Position {p.position_id}: Gross Unrealized PnL = {p.gross_unrealized_pnl}, Net Unrealized PnL = {p.net_unrealized_pnl}")
 ```

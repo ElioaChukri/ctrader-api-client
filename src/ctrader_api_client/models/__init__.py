@@ -27,7 +27,7 @@ from .account import Account, AccountSummary
 from .deal import CloseDetail, Deal
 from .market_data import TickData, Trendbar
 from .order import Order
-from .position import Position
+from .position import Position, PositionUnrealizedPnL
 from .requests import AmendOrderRequest, AmendPositionRequest, ClosePositionRequest, NewOrderRequest
 from .symbol import Symbol, SymbolInfo
 
@@ -43,6 +43,7 @@ __all__ = [
     "NewOrderRequest",
     "Order",
     "Position",
+    "PositionUnrealizedPnL",
     "Symbol",
     "SymbolInfo",
     "TickData",

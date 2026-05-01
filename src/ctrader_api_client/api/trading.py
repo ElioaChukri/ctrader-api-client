@@ -13,6 +13,8 @@ from .._internal.proto import (
     ProtoOADealListRes,
     ProtoOAExecutionEvent,
     ProtoOAExecutionType,
+    ProtoOAGetPositionUnrealizedPnLReq,
+    ProtoOAGetPositionUnrealizedPnLRes,
     ProtoOAOrderErrorEvent,
     ProtoOAOrderListReq,
     ProtoOAOrderListRes,
@@ -22,7 +24,7 @@ from .._internal.proto import (
 from ..enums import ExecutionType, OrderSide
 from ..events import ExecutionEvent
 from ..exceptions import APIError
-from ..models import Deal, Order, Position
+from ..models import Deal, Order, Position, PositionUnrealizedPnL
 from ..models.requests import (
     AmendOrderRequest,
     AmendPositionRequest,
@@ -165,6 +167,38 @@ class TradingAPI:
         """
         self._protocol = protocol
         self._default_timeout = default_timeout
+
+    async def get_unrealized_pnl_per_position(self, account_id: int) -> list[PositionUnrealizedPnL]:
+        """Get unrealized PnL for each open position.
+
+        Args:
+            account_id: The cTID trader account ID.
+
+        Returns:
+            List of PositionUnrealizedPnL, one per open position.
+        """
+        request = ProtoOAGetPositionUnrealizedPnLReq(ctid_trader_account_id=account_id)
+
+        response = await self._protocol.send_request(
+            request,
+            timeout=self._default_timeout,
+        )
+
+        if not isinstance(response, ProtoOAGetPositionUnrealizedPnLRes):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected ProtoOAGetPositionUnrealizedPnLRes, got {type(response).__name__}",
+            )
+
+        divisor = 10**response.money_digits
+        return [
+            PositionUnrealizedPnL(
+                position_id=p.position_id,
+                gross_unrealized_pnl=p.gross_unrealized_pn_l / divisor,
+                net_unrealized_pnl=p.net_unrealized_pn_l / divisor,
+            )
+            for p in response.position_unrealized_pn_l
+        ]
 
     async def place_order(
         self,
