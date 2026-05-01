@@ -310,7 +310,7 @@ class Protocol:
 
     async def handle_disconnect(self) -> None:
         """Handle unexpected disconnection and attempt reconnection."""
-        logger.info("Connection lost, attempting to reconnect...")
+        logger.warning("Connection lost, attempting to reconnect...")
 
         # Cancel the reader loop first to prevent race conditions
         if self._reader_scope is not None:

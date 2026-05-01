@@ -88,9 +88,12 @@ class Transport:
             stream = self._stream
             self._stream = None  # Clear reference first to prevent re-entry
             try:
-                await stream.aclose()
+                # move_on_after guards against aclose() hanging when the network
+                # route has changed (e.g. VPN toggle) but the OS hasn't reset the
+                # TCP socket — graceful TLS shutdown would wait forever for an ACK.
+                with anyio.move_on_after(5):
+                    await stream.aclose()
             except (OSError, anyio.ClosedResourceError):
-                # Stream already closed or in bad state - ignore
                 pass
 
     async def send(self, data: bytes) -> None:
