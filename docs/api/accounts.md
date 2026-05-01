@@ -41,4 +41,3 @@ for acc in accounts:
 ## Related
 
 - [Authentication](client.md#authentication) - Authenticating accounts
-- [Models - Account](models.md#account) - Account model reference

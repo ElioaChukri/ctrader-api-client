@@ -10,6 +10,10 @@ default: help
 help:
     just --list
 
+# Spin up documentation server using MkDocs
+documentation:
+    uv run mkdocs serve
+
 # Run all CI steps: linting, formatting, type checking
 ci directory='':
     @just lint {{directory}}
