@@ -156,7 +156,8 @@ class NewOrderRequest(FrozenModel):
 class AmendOrderRequest(FrozenModel):
     """Request to modify a pending order.
 
-    Only include fields you want to change.
+    Setting any field to None will unset that field (e.g. remove stop loss), while setting it to a value will update it.
+    To keep the existing value of a field, you must include the current value in the request.
 
     Attributes:
         order_id: The order to modify.
@@ -200,7 +201,7 @@ class AmendOrderRequest(FrozenModel):
             Proto request message.
         """
 
-        trigger_method = ProtoOAOrderTriggerMethod.TRADE
+        trigger_method = None
         if self.stop_trigger_method:
             trigger_method = ProtoOAOrderTriggerMethod(_TRIGGER_TO_PROTO[self.stop_trigger_method])
 
@@ -219,7 +220,7 @@ class AmendOrderRequest(FrozenModel):
             relative_take_profit=int(self.relative_take_profit * 1e5) if self.relative_take_profit else 0,
             guaranteed_stop_loss=self.guaranteed_stop_loss if self.guaranteed_stop_loss is not None else False,
             trailing_stop_loss=self.trailing_stop_loss if self.trailing_stop_loss is not None else False,
-            stop_trigger_method=trigger_method,
+            stop_trigger_method=trigger_method,  # type: ignore[arg-type]
         )
 
 
