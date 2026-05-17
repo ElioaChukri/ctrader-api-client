@@ -183,10 +183,12 @@ class EventRouter:
         event = SpotEvent(
             account_id=proto.ctid_trader_account_id,
             symbol_id=proto.symbol_id,
-            bid=proto.bid / 1e5 if proto.bid else None,
-            ask=proto.ask / 1e5 if proto.ask else None,
+            bid=proto.bid / Decimal(100000) if proto.bid else None,
+            ask=proto.ask / Decimal(100000) if proto.ask else None,
             timestamp=self._timestamp_to_datetime(proto.timestamp) if proto.timestamp else datetime.now(UTC),
-            trendbar=Trendbar.from_proto(proto.trendbar[0], bid_price=proto.bid) if proto.trendbar else None,
+            trendbar=(
+                Trendbar.from_proto(proto.trendbar[0], bid_price=Decimal(str(proto.bid))) if proto.trendbar else None
+            ),
         )
         await self._emitter.emit(event)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from .._internal.proto import (
     ProtoOAAmendOrderReq,
@@ -76,11 +77,11 @@ class NewOrderRequest(FrozenModel):
     volume: int
     order_type: OrderType = OrderType.MARKET
 
-    # Prices (as float for convenience)
-    limit_price: float | None = None
-    stop_price: float | None = None
-    stop_loss: float | None = None
-    take_profit: float | None = None
+    # Prices
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
 
     # Duration
     time_in_force: TimeInForce = TimeInForce.GOOD_TILL_CANCEL
@@ -95,12 +96,12 @@ class NewOrderRequest(FrozenModel):
     comment: str = ""
 
     # Slippage
-    base_slippage_price: float | None = None
+    base_slippage_price: Decimal | None = None
     slippage_in_points: int | None = None
 
     # Relative SL/TP
-    relative_stop_loss: float | None = None
-    relative_take_profit: float | None = None
+    relative_stop_loss: Decimal | None = None
+    relative_take_profit: Decimal | None = None
 
     # Flags
     trailing_stop_loss: bool = False
@@ -133,20 +134,20 @@ class NewOrderRequest(FrozenModel):
             order_type=order_type_value,
             trade_side=trade_side_value,
             volume=self.volume,
-            limit_price=self.limit_price or 0.0,
-            stop_price=self.stop_price or 0.0,
+            limit_price=float(self.limit_price) if self.limit_price else 0.0,
+            stop_price=float(self.stop_price) if self.stop_price else 0.0,
             time_in_force=time_in_force_value,
             expiration_timestamp=int(self.expiration_timestamp.timestamp() * 1000) if self.expiration_timestamp else 0,
-            stop_loss=self.stop_loss or 0.0,
-            take_profit=self.take_profit or 0.0,
+            stop_loss=float(self.stop_loss) if self.stop_loss else 0.0,
+            take_profit=float(self.take_profit) if self.take_profit else 0.0,
             comment=self.comment,
-            base_slippage_price=self.base_slippage_price or 0.0,
+            base_slippage_price=float(self.base_slippage_price) if self.base_slippage_price else 0.0,
             slippage_in_points=self.slippage_in_points or 0,
             label=self.label,
             position_id=self.position_id or 0,
             client_order_id=self.client_order_id,
-            relative_stop_loss=int(self.relative_stop_loss * 1e5) if self.relative_stop_loss else 0,
-            relative_take_profit=int(self.relative_take_profit * 1e5) if self.relative_take_profit else 0,
+            relative_stop_loss=int(self.relative_stop_loss * 100000) if self.relative_stop_loss else 0,
+            relative_take_profit=int(self.relative_take_profit * 100000) if self.relative_take_profit else 0,
             guaranteed_stop_loss=self.guaranteed_stop_loss,
             trailing_stop_loss=self.trailing_stop_loss,
             stop_trigger_method=trigger_method,  # type: ignore[arg-type]
@@ -179,16 +180,16 @@ class AmendOrderRequest(FrozenModel):
 
     # Optional updates
     volume: int | None = None
-    limit_price: float | None = None
-    stop_price: float | None = None
-    stop_loss: float | None = None
-    take_profit: float | None = None
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
     expiration_timestamp: datetime | None = None
     slippage_in_points: int | None = None
     trailing_stop_loss: bool | None = None
     guaranteed_stop_loss: bool | None = None
-    relative_stop_loss: float | None = None
-    relative_take_profit: float | None = None
+    relative_stop_loss: Decimal | None = None
+    relative_take_profit: Decimal | None = None
     stop_trigger_method: StopTriggerMethod | None = None
 
     def to_proto(self, account_id: int) -> ProtoOAAmendOrderReq:
@@ -210,14 +211,14 @@ class AmendOrderRequest(FrozenModel):
             ctid_trader_account_id=account_id,
             order_id=self.order_id,
             volume=self.volume or 0,
-            limit_price=self.limit_price or 0.0,
-            stop_price=self.stop_price or 0.0,
+            limit_price=float(self.limit_price) if self.limit_price else 0.0,
+            stop_price=float(self.stop_price) if self.stop_price else 0.0,
             expiration_timestamp=int(self.expiration_timestamp.timestamp() * 1000) if self.expiration_timestamp else 0,
-            stop_loss=self.stop_loss or 0.0,
-            take_profit=self.take_profit or 0.0,
+            stop_loss=float(self.stop_loss) if self.stop_loss else 0.0,
+            take_profit=float(self.take_profit) if self.take_profit else 0.0,
             slippage_in_points=self.slippage_in_points or 0,
-            relative_stop_loss=int(self.relative_stop_loss * 1e5) if self.relative_stop_loss else 0,
-            relative_take_profit=int(self.relative_take_profit * 1e5) if self.relative_take_profit else 0,
+            relative_stop_loss=int(self.relative_stop_loss * 100000) if self.relative_stop_loss else 0,
+            relative_take_profit=int(self.relative_take_profit * 100000) if self.relative_take_profit else 0,
             guaranteed_stop_loss=self.guaranteed_stop_loss if self.guaranteed_stop_loss is not None else False,
             trailing_stop_loss=self.trailing_stop_loss if self.trailing_stop_loss is not None else False,
             stop_trigger_method=trigger_method,  # type: ignore[arg-type]
@@ -237,8 +238,8 @@ class AmendPositionRequest(FrozenModel):
     """
 
     position_id: int
-    stop_loss: float | None = None
-    take_profit: float | None = None
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
     trailing_stop_loss: bool = False
     guaranteed_stop_loss: bool = False
     stop_loss_trigger_method: StopTriggerMethod | None = None
@@ -261,8 +262,8 @@ class AmendPositionRequest(FrozenModel):
             payload_type=ProtoOAPayloadType.PROTO_OA_AMEND_POSITION_SLTP_REQ,
             ctid_trader_account_id=account_id,
             position_id=self.position_id,
-            stop_loss=self.stop_loss or 0.0,
-            take_profit=self.take_profit or 0.0,
+            stop_loss=float(self.stop_loss) if self.stop_loss else 0.0,
+            take_profit=float(self.take_profit) if self.take_profit else 0.0,
             guaranteed_stop_loss=self.guaranteed_stop_loss,
             trailing_stop_loss=self.trailing_stop_loss,
             stop_loss_trigger_method=trigger_method,

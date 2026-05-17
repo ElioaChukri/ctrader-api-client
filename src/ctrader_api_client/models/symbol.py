@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOATradingMode
@@ -100,8 +101,8 @@ class Symbol(FrozenModel):
     max_volume: int
     step_volume: int
     trading_mode: TradingMode
-    swap_long: float
-    swap_short: float
+    swap_long: Decimal
+    swap_short: Decimal
 
     # Optional fields
     commission: int = 0
@@ -114,7 +115,7 @@ class Symbol(FrozenModel):
     schedule_timezone: str = ""
     measurement_units: str = ""
 
-    def volume_to_lots(self, volume_cents: int) -> float:
+    def volume_to_lots(self, volume_cents: int) -> Decimal:
         """Convert volume in cents to lots.
 
         Args:
@@ -123,9 +124,9 @@ class Symbol(FrozenModel):
         Returns:
             Volume in lots.
         """
-        return volume_cents / self.lot_size
+        return Decimal(volume_cents) / Decimal(self.lot_size)
 
-    def lots_to_volume(self, lots: float) -> int:
+    def lots_to_volume(self, lots: Decimal) -> int:
         """Convert lots to volume in cents.
 
         Args:
@@ -155,8 +156,8 @@ class Symbol(FrozenModel):
             max_volume=proto.max_volume,
             step_volume=proto.step_volume,
             trading_mode=_TRADING_MODE_MAP.get(proto.trading_mode, TradingMode.ENABLED),
-            swap_long=proto.swap_long,
-            swap_short=proto.swap_short,
+            swap_long=Decimal(str(proto.swap_long)),
+            swap_short=Decimal(str(proto.swap_short)),
             commission=proto.commission if proto.commission else 0,
             max_exposure=proto.max_exposure if proto.max_exposure else None,
             leverage_id=proto.leverage_id if proto.leverage_id else None,

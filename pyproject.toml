@@ -51,6 +51,8 @@ select = [
     "C4",   # comprehensions
     "ARG",  # Flags unused function arguments
     "RUF022", # Unsorted __all__ blocks
+    "FURB157",  # Check unnecessary casts in Decimal constructors
+    "RUF032",  # Check for Decimal calls passing a float literal
 ]
 
 [tool.ruff.lint.per-file-ignores]

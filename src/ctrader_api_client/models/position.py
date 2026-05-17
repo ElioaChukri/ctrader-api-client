@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOAOrderTriggerMethod, ProtoOAPositionStatus
@@ -43,12 +44,12 @@ class Position(FrozenModel):
         symbol_id: The symbol being traded.
         side: Position direction (BUY/SELL).
         volume: Position volume in cents.
-        entry_price: Entry price as float from API.
+        entry_price: Entry price as Decimal from API.
         status: Current position status.
         open_timestamp: When the position was opened.
         money_digits: Decimal places for monetary values.
-        stop_loss: Stop loss price as float, or None if not set.
-        take_profit: Take profit price as float, or None if not set.
+        stop_loss: Stop loss price as Decimal, or None if not set.
+        take_profit: Take profit price as Decimal, or None if not set.
         trailing_stop_loss: Whether trailing stop is enabled.
         guaranteed_stop_loss: Whether guaranteed stop loss is enabled.
         stop_loss_trigger_method: Method for triggering stop loss.
@@ -66,23 +67,23 @@ class Position(FrozenModel):
     symbol_id: int
     side: OrderSide
     volume: int
-    entry_price: float
+    entry_price: Decimal
     status: PositionStatus
     open_timestamp: datetime
     money_digits: int
 
     # Protection orders
-    stop_loss: float | None = None
-    take_profit: float | None = None
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
     trailing_stop_loss: bool = False
     guaranteed_stop_loss: bool = False
     stop_loss_trigger_method: StopTriggerMethod = StopTriggerMethod.TRADE
 
     # Financial
-    swap: float = 0
-    commission: float = 0
-    used_margin: float = 0
-    margin_rate: float | None = None
+    swap: Decimal = Decimal(0)
+    commission: Decimal = Decimal(0)
+    used_margin: Decimal = Decimal(0)
+    margin_rate: Decimal | None = None
 
     # Metadata
     label: str = ""
@@ -120,19 +121,19 @@ class Position(FrozenModel):
             symbol_id=trade_data.symbol_id if trade_data else 0,
             side=side,
             volume=trade_data.volume if trade_data else 0,
-            entry_price=proto.price if proto.price else 0.0,
+            entry_price=Decimal(str(proto.price)) if proto.price else Decimal(0),
             status=_POSITION_STATUS_MAP.get(proto.position_status, PositionStatus.OPEN),
             open_timestamp=open_ts,
             money_digits=proto.money_digits if proto.money_digits else 2,
-            stop_loss=proto.stop_loss if proto.stop_loss else None,
-            take_profit=proto.take_profit if proto.take_profit else None,
+            stop_loss=Decimal(str(proto.stop_loss)) if proto.stop_loss else None,
+            take_profit=Decimal(str(proto.take_profit)) if proto.take_profit else None,
             trailing_stop_loss=proto.trailing_stop_loss,
             guaranteed_stop_loss=proto.guaranteed_stop_loss,
             stop_loss_trigger_method=_TRIGGER_METHOD_MAP.get(proto.stop_loss_trigger_method, StopTriggerMethod.TRADE),
-            swap=proto.swap / divisor if proto.swap else 0,
-            commission=proto.commission / divisor if proto.commission else 0,
-            used_margin=proto.used_margin / divisor if proto.used_margin else 0,
-            margin_rate=proto.margin_rate if proto.margin_rate else None,
+            swap=Decimal(proto.swap) / divisor if proto.swap else Decimal(0),
+            commission=Decimal(proto.commission) / divisor if proto.commission else Decimal(0),
+            used_margin=Decimal(proto.used_margin) / divisor if proto.used_margin else Decimal(0),
+            margin_rate=Decimal(str(proto.margin_rate)) if proto.margin_rate else None,
             label=trade_data.label if trade_data else "",
             comment=trade_data.comment if trade_data else "",
             last_update_timestamp=(
@@ -157,5 +158,5 @@ class PositionUnrealizedPnL(FrozenModel):
     """
 
     position_id: int
-    gross_unrealized_pnl: float
-    net_unrealized_pnl: float
+    gross_unrealized_pnl: Decimal
+    net_unrealized_pnl: Decimal

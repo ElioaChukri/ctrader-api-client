@@ -1,6 +1,7 @@
 """Tests for EventEmitter."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -140,8 +141,8 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -161,8 +162,8 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=456,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -182,8 +183,8 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=2,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -202,8 +203,8 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -233,8 +234,8 @@ class TestEventEmitterEmit:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -259,8 +260,8 @@ class TestEventEmitterErrorHandling:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -283,8 +284,8 @@ class TestEventEmitterErrorHandling:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )
@@ -308,8 +309,8 @@ class TestEventEmitterErrorHandling:
         event = SpotEvent(
             account_id=123,
             symbol_id=1,
-            bid=1.23000,
-            ask=1.23050,
+            bid=Decimal("1.23000"),
+            ask=Decimal("1.23050"),
             trendbar=None,
             timestamp=datetime.now(UTC),
         )

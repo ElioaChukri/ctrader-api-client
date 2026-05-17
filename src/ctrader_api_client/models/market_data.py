@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOATrendbarPeriod
@@ -49,14 +50,14 @@ class Trendbar(FrozenModel):
 
     timestamp: datetime
     period: TrendbarPeriod
-    open: float
-    high: float
-    low: float
-    close: float
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
     volume: int
 
     @classmethod
-    def from_proto(cls, proto: ProtoOATrendbar, bid_price: float | None = None, historical: bool = False) -> Trendbar:
+    def from_proto(cls, proto: ProtoOATrendbar, bid_price: Decimal | None = None, historical: bool = False) -> Trendbar:
         """Create a Trendbar from a proto message.
 
         Args:
@@ -89,13 +90,14 @@ class Trendbar(FrozenModel):
                 )
             close = low + proto.delta_close
 
+        divisor = Decimal(100000)
         return cls(
             timestamp=ts,
             period=_PERIOD_MAP.get(proto.period, TrendbarPeriod.M1),
-            low=low / 1e5,
-            open=open_price / 1e5,
-            high=high / 1e5,
-            close=close / 1e5,
+            low=Decimal(low) / divisor,
+            open=Decimal(open_price) / divisor,
+            high=Decimal(high) / divisor,
+            close=Decimal(close) / divisor,
             volume=proto.volume,
         )
 
@@ -111,13 +113,13 @@ class TickData(FrozenModel):
     """
 
     timestamp: datetime
-    price: float
+    price: Decimal
 
     @classmethod
     def from_proto(cls, proto: ProtoOATickData) -> TickData:
         """Create TickData from proto message.
 
-        Note that price needs to be converted from a raw integer to a float by dividing by 1e5.
+        Note that price needs to be converted from a raw integer to a Decimal by dividing by 100000.
 
         Args:
             proto: The proto message.
@@ -128,7 +130,7 @@ class TickData(FrozenModel):
         # Proto timestamp is delta from base in milliseconds
         return cls(
             timestamp=datetime.fromtimestamp(proto.timestamp / 1000, tz=UTC),
-            price=proto.tick / 1e5,
+            price=Decimal(proto.tick) / Decimal(100000),
         )
 
     @classmethod
@@ -139,7 +141,7 @@ class TickData(FrozenModel):
         the first data point being an absolute value.
         This method converts them to absolute values.
 
-        Additionally, price needs to be converted from a raw integer to a float by dividing by 1e5.
+        Additionally, price needs to be converted from a raw integer to a Decimal by dividing by 100000.
 
         Args:
             protos: List of proto tick data messages.
@@ -161,7 +163,7 @@ class TickData(FrozenModel):
             ticks.append(
                 cls(
                     timestamp=datetime.fromtimestamp(current_timestamp / 1000, tz=UTC),
-                    price=current_price / 1e5,
+                    price=Decimal(current_price) / Decimal(100000),
                 )
             )
 

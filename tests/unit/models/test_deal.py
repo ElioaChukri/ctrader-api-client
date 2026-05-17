@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import DealStatus, OrderSide
@@ -28,14 +29,14 @@ class TestCloseDetail:
 
         detail = CloseDetail.from_proto(proto)
 
-        assert detail.entry_price == 1.12345
+        assert detail.entry_price == Decimal("1.12345")
         assert detail.closed_volume == 100000
-        assert detail.gross_profit == 500.0  # Divided by 10^2
-        assert detail.swap == -10.0
-        assert detail.commission == -7.0
-        assert detail.balance == 105000.0
-        assert detail.pnl_conversion_fee == 0.5
-        assert detail.quote_to_deposit_rate == 1.0
+        assert detail.gross_profit == Decimal(500)
+        assert detail.swap == Decimal(-10)
+        assert detail.commission == Decimal(-7)
+        assert detail.balance == Decimal(105000)
+        assert detail.pnl_conversion_fee == Decimal("0.5")
+        assert detail.quote_to_deposit_rate == Decimal("1.0")
         assert detail.balance_version == 42
 
 
@@ -72,13 +73,13 @@ class TestDealFromProto:
         assert deal.side == OrderSide.BUY
         assert deal.volume == 100000
         assert deal.filled_volume == 100000
-        assert deal.execution_price == 1.12345
+        assert deal.execution_price == Decimal("1.12345")
         assert deal.execution_timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
         assert deal.status == DealStatus.FILLED
-        assert deal.commission == -7.0  # Divided by 10^2
+        assert deal.commission == Decimal(-7)
         assert deal.create_timestamp == datetime(2023, 12, 31, 23, 58, 20, tzinfo=UTC)
-        assert deal.margin_rate == 0.01
-        assert deal.base_to_usd_rate == 1.1
+        assert deal.margin_rate == Decimal("0.01")
+        assert deal.base_to_usd_rate == Decimal("1.1")
         assert deal.close_detail is None
 
     def test_from_proto_with_close_detail(self) -> None:
@@ -117,9 +118,9 @@ class TestDealFromProto:
         deal = Deal.from_proto(proto)
 
         assert deal.close_detail is not None
-        assert deal.close_detail.entry_price == 1.11000
+        assert deal.close_detail.entry_price == Decimal("1.11")
         assert deal.close_detail.closed_volume == 100000
-        assert deal.close_detail.gross_profit == 500.0  # Divided by 10^2
+        assert deal.close_detail.gross_profit == Decimal(500)
 
     def test_from_proto_close_detail_requires_positive_balance(self) -> None:
         """Test that close_detail is None when balance is 0."""
@@ -199,12 +200,12 @@ class TestDealProperties:
     def test_is_closing_deal_true_with_close_detail(self) -> None:
         """Test is_closing_deal returns True when close_detail is present."""
         close_detail = CloseDetail(
-            entry_price=1.11000,
+            entry_price=Decimal("1.11"),
             closed_volume=100000,
-            gross_profit=500.0,
-            swap=-10.0,
-            commission=-7.0,
-            balance=105000.0,
+            gross_profit=Decimal(500),
+            swap=Decimal(-10),
+            commission=Decimal(-7),
+            balance=Decimal(105000),
         )
 
         deal = Deal(
@@ -215,10 +216,10 @@ class TestDealProperties:
             side=OrderSide.SELL,
             volume=100000,
             filled_volume=100000,
-            execution_price=1.12345,
+            execution_price=Decimal("1.12345"),
             execution_timestamp=datetime.now(UTC),
             status=DealStatus.FILLED,
-            commission=-7.0,
+            commission=Decimal(-7),
             close_detail=close_detail,
         )
 
@@ -234,10 +235,10 @@ class TestDealProperties:
             side=OrderSide.BUY,
             volume=100000,
             filled_volume=100000,
-            execution_price=1.12345,
+            execution_price=Decimal("1.12345"),
             execution_timestamp=datetime.now(UTC),
             status=DealStatus.FILLED,
-            commission=-7.0,
+            commission=Decimal(-7),
         )
 
         assert deal.is_closing_deal is False

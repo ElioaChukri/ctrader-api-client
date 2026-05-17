@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOAOrderStatus, ProtoOAOrderTriggerMethod, ProtoOAOrderType, ProtoOATimeInForce
@@ -65,11 +66,11 @@ class Order(FrozenModel):
         volume: Order volume in cents.
         time_in_force: Order duration type.
         open_timestamp: When the order was created.
-        limit_price: Limit price as float, or None.
-        stop_price: Stop trigger price as float, or None.
-        stop_loss: Stop loss price as float, or None.
-        take_profit: Take profit price as float, or None.
-        execution_price: Average fill price as float, or None.
+        limit_price: Limit price, or None.
+        stop_price: Stop trigger price, or None.
+        stop_loss: Stop loss price, or None.
+        take_profit: Take profit price, or None.
+        execution_price: Average fill price, or None.
         executed_volume: Volume that has been filled, in cents.
         expiration_timestamp: When the order expires, or None.
         position_id: Associated position ID, or None.
@@ -97,12 +98,12 @@ class Order(FrozenModel):
     time_in_force: TimeInForce
     open_timestamp: datetime
 
-    # Prices (as float from API)
-    limit_price: float | None = None
-    stop_price: float | None = None
-    stop_loss: float | None = None
-    take_profit: float | None = None
-    execution_price: float | None = None
+    # Prices
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
+    execution_price: Decimal | None = None
 
     # Execution
     executed_volume: int = 0
@@ -110,7 +111,7 @@ class Order(FrozenModel):
     position_id: int | None = None
 
     # Slippage
-    base_slippage_price: float | None = None
+    base_slippage_price: Decimal | None = None
     slippage_in_points: int | None = None
 
     # Relative SL/TP (in points)
@@ -171,17 +172,17 @@ class Order(FrozenModel):
             volume=trade_data.volume if trade_data else 0,
             time_in_force=_TIME_IN_FORCE_MAP.get(proto.time_in_force, TimeInForce.GOOD_TILL_CANCEL),
             open_timestamp=open_ts,
-            limit_price=proto.limit_price if proto.limit_price else None,
-            stop_price=proto.stop_price if proto.stop_price else None,
-            stop_loss=proto.stop_loss if proto.stop_loss else None,
-            take_profit=proto.take_profit if proto.take_profit else None,
-            execution_price=proto.execution_price if proto.execution_price else None,
+            limit_price=Decimal(str(proto.limit_price)) if proto.limit_price else None,
+            stop_price=Decimal(str(proto.stop_price)) if proto.stop_price else None,
+            stop_loss=Decimal(str(proto.stop_loss)) if proto.stop_loss else None,
+            take_profit=Decimal(str(proto.take_profit)) if proto.take_profit else None,
+            execution_price=Decimal(str(proto.execution_price)) if proto.execution_price else None,
             executed_volume=proto.executed_volume if proto.executed_volume else 0,
             expiration_timestamp=(
                 _timestamp_to_datetime(proto.expiration_timestamp) if proto.expiration_timestamp else None
             ),
             position_id=proto.position_id if proto.position_id else None,
-            base_slippage_price=proto.base_slippage_price if proto.base_slippage_price else None,
+            base_slippage_price=Decimal(str(proto.base_slippage_price)) if proto.base_slippage_price else None,
             slippage_in_points=proto.slippage_in_points if proto.slippage_in_points else None,
             relative_stop_loss=proto.relative_stop_loss if proto.relative_stop_loss else None,
             relative_take_profit=proto.relative_take_profit if proto.relative_take_profit else None,

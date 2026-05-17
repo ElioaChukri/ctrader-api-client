@@ -30,8 +30,8 @@ class SpotEvent:
 
     account_id: int
     symbol_id: int
-    bid: float | None
-    ask: float | None
+    bid: Decimal | None
+    ask: Decimal | None
     trendbar: Trendbar | None
     timestamp: datetime
 

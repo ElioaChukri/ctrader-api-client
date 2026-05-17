@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import AccessRights, AccountType
@@ -90,7 +91,7 @@ class TestAccount:
 
         assert account.account_id == 12345
         assert account.trader_login == 67890
-        assert account.balance == 10000.0  # Divided by 10^2
+        assert account.balance == Decimal(10000)
         assert account.leverage_in_cents == 10000
         assert account.account_type == AccountType.HEDGED
         assert account.access_rights == AccessRights.FULL_ACCESS
@@ -101,9 +102,9 @@ class TestAccount:
         assert account.registration_timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
         assert account.max_leverage == 500
         assert account.balance_version == 42
-        assert account.manager_bonus == 10.0
-        assert account.ib_bonus == 5.0
-        assert account.non_withdrawable_bonus == 2.50
+        assert account.manager_bonus == Decimal(10)
+        assert account.ib_bonus == Decimal(5)
+        assert account.non_withdrawable_bonus == Decimal("2.50")
 
     def test_from_proto_maps_account_types(self) -> None:
         """Test that all account types are correctly mapped."""
@@ -168,12 +169,12 @@ class TestAccount:
             account = Account.from_proto(base_proto)
             assert account.access_rights == expected_rights
 
-    def test_balance_is_float(self) -> None:
-        """Test balance is directly accessible as float."""
+    def test_balance_is_decimal(self) -> None:
+        """Test balance is stored and accessible as Decimal."""
         account = Account(
             account_id=1,
             trader_login=1,
-            balance=12345.67,
+            balance=Decimal("12345.67"),
             leverage_in_cents=10000,
             account_type=AccountType.HEDGED,
             access_rights=AccessRights.FULL_ACCESS,
@@ -183,14 +184,14 @@ class TestAccount:
             is_limited_risk=False,
         )
 
-        assert account.balance == 12345.67
+        assert account.balance == Decimal("12345.67")
 
     def test_get_leverage_100(self) -> None:
         """Test get_leverage returns 1:100 for 10000 cents."""
         account = Account(
             account_id=1,
             trader_login=1,
-            balance=0.0,
+            balance=Decimal("0.0"),
             leverage_in_cents=10000,
             account_type=AccountType.HEDGED,
             access_rights=AccessRights.FULL_ACCESS,

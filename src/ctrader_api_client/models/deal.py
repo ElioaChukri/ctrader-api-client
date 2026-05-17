@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOADealStatus
@@ -45,14 +46,14 @@ class CloseDetail(FrozenModel):
         balance_version: Version number for balance updates.
     """
 
-    entry_price: float
+    entry_price: Decimal
     closed_volume: int
-    gross_profit: float
-    swap: float
-    commission: float
-    balance: float
-    pnl_conversion_fee: float = 0
-    quote_to_deposit_rate: float | None = None
+    gross_profit: Decimal
+    swap: Decimal
+    commission: Decimal
+    balance: Decimal
+    pnl_conversion_fee: Decimal = Decimal(0)
+    quote_to_deposit_rate: Decimal | None = None
     balance_version: int | None = None
 
     @classmethod
@@ -68,14 +69,14 @@ class CloseDetail(FrozenModel):
         money_digits = proto.money_digits if proto.money_digits else 2
         divisor = 10**money_digits
         return cls(
-            entry_price=proto.entry_price,
+            entry_price=Decimal(str(proto.entry_price)),
             closed_volume=proto.closed_volume,
-            gross_profit=proto.gross_profit / divisor,
-            swap=proto.swap / divisor,
-            commission=proto.commission / divisor,
-            balance=proto.balance / divisor,
-            pnl_conversion_fee=proto.pnl_conversion_fee / divisor if proto.pnl_conversion_fee else 0,
-            quote_to_deposit_rate=proto.quote_to_deposit_conversion_rate
+            gross_profit=Decimal(proto.gross_profit) / divisor,
+            swap=Decimal(proto.swap) / divisor,
+            commission=Decimal(proto.commission) / divisor,
+            balance=Decimal(proto.balance) / divisor,
+            pnl_conversion_fee=Decimal(proto.pnl_conversion_fee) / divisor if proto.pnl_conversion_fee else Decimal(0),
+            quote_to_deposit_rate=Decimal(str(proto.quote_to_deposit_conversion_rate))
             if proto.quote_to_deposit_conversion_rate
             else None,
             balance_version=proto.balance_version if proto.balance_version else None,
@@ -114,16 +115,16 @@ class Deal(FrozenModel):
     side: OrderSide
     volume: int
     filled_volume: int
-    execution_price: float
+    execution_price: Decimal
     execution_timestamp: datetime
     status: DealStatus
-    commission: float
+    commission: Decimal
 
     # Optional
     create_timestamp: datetime | None = None
     last_update_timestamp: datetime | None = None
-    margin_rate: float | None = None
-    base_to_usd_rate: float | None = None
+    margin_rate: Decimal | None = None
+    base_to_usd_rate: Decimal | None = None
     close_detail: CloseDetail | None = None
 
     @property
@@ -163,15 +164,17 @@ class Deal(FrozenModel):
             side=side,
             volume=proto.volume,
             filled_volume=proto.filled_volume,
-            execution_price=proto.execution_price,
+            execution_price=Decimal(str(proto.execution_price)),
             execution_timestamp=_timestamp_to_datetime(proto.execution_timestamp),
             status=_DEAL_STATUS_MAP.get(proto.deal_status, DealStatus.FILLED),
-            commission=proto.commission / divisor if proto.commission else 0,
+            commission=Decimal(proto.commission) / divisor if proto.commission else Decimal(0),
             create_timestamp=_timestamp_to_datetime(proto.create_timestamp) if proto.create_timestamp else None,
             last_update_timestamp=(
                 _timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
             ),
-            margin_rate=proto.margin_rate if proto.margin_rate else None,
-            base_to_usd_rate=proto.base_to_usd_conversion_rate if proto.base_to_usd_conversion_rate else None,
+            margin_rate=Decimal(str(proto.margin_rate)) if proto.margin_rate else None,
+            base_to_usd_rate=(
+                Decimal(str(proto.base_to_usd_conversion_rate)) if proto.base_to_usd_conversion_rate else None
+            ),
             close_detail=close_detail,
         )

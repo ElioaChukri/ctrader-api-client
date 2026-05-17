@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from .._internal.proto import ProtoOAAccessRights, ProtoOAAccountType
@@ -107,7 +108,7 @@ class Account(FrozenModel):
 
     account_id: int
     trader_login: int
-    balance: float
+    balance: Decimal
     leverage_in_cents: int
     account_type: AccountType
     access_rights: AccessRights
@@ -120,9 +121,9 @@ class Account(FrozenModel):
     # Optional fields
     max_leverage: int | None = None
     balance_version: int | None = None
-    manager_bonus: float | None = None
-    ib_bonus: float | None = None
-    non_withdrawable_bonus: float | None = None
+    manager_bonus: Decimal | None = None
+    ib_bonus: Decimal | None = None
+    non_withdrawable_bonus: Decimal | None = None
 
     def get_leverage(self) -> str:
         """Get leverage as human-readable string.
@@ -148,7 +149,7 @@ class Account(FrozenModel):
         return cls(
             account_id=proto.ctid_trader_account_id,
             trader_login=proto.trader_login,
-            balance=proto.balance / divisor,
+            balance=Decimal(proto.balance) / divisor,
             leverage_in_cents=proto.leverage_in_cents,
             account_type=_ACCOUNT_TYPE_MAP.get(proto.account_type, AccountType.HEDGED),
             access_rights=_ACCESS_RIGHTS_MAP.get(proto.access_rights, AccessRights.FULL_ACCESS),
@@ -161,7 +162,9 @@ class Account(FrozenModel):
             ),
             max_leverage=proto.max_leverage if proto.max_leverage else None,
             balance_version=proto.balance_version if proto.balance_version else None,
-            manager_bonus=proto.manager_bonus / divisor if proto.manager_bonus else None,
-            ib_bonus=proto.ib_bonus / divisor if proto.ib_bonus else None,
-            non_withdrawable_bonus=proto.non_withdrawable_bonus / divisor if proto.non_withdrawable_bonus else None,
+            manager_bonus=Decimal(proto.manager_bonus) / divisor if proto.manager_bonus else None,
+            ib_bonus=Decimal(proto.ib_bonus) / divisor if proto.ib_bonus else None,
+            non_withdrawable_bonus=Decimal(proto.non_withdrawable_bonus) / divisor
+            if proto.non_withdrawable_bonus
+            else None,
         )

@@ -166,30 +166,30 @@ symbol = await client.symbols.get_by_id(account_id, 270)
 volume = symbol.lots_to_volume(0.1)  # Returns volume in cents
 
 # Convert volume to lots for display
-lots = symbol.volume_to_lots(position.volume)  # Returns lots as float
+lots = symbol.volume_to_lots(position.volume)  # Returns lots as Decimal
 ```
 
 ## Price Values
 
-Prices in events and models (bid, ask, OHLC, execution prices, etc.) are returned as **floats** - no conversion needed:
+Prices in events and models (bid, ask, OHLC, execution prices, etc.) are returned as **Decimals** - no conversion needed:
 
 ```python
 @client.on(SpotEvent)
 async def on_price(event: SpotEvent):
-    # bid and ask are already floats
+    # bid and ask are already Decimals
     spread = event.ask - event.bid
     print(f"Spread: {spread}")
 
-# Trendbar OHLC are floats
+# Trendbar OHLC are Decimals
 for bar in trendbars:
     range_size = bar.high - bar.low
     print(f"Range: {range_size}")
 
-# Account balance is a float
+# Account balance is a Decimal
 account = await client.accounts.get_trader(account_id)
 print(f"Balance: {account.balance}")
 
-# Position values are floats
+# Position values are Decimals
 for pos in positions:
     print(f"Swap: {pos.swap}, Commission: {pos.commission}")
 ```

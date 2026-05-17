@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import TrendbarPeriod
@@ -25,11 +26,10 @@ class TestTrendbarFromProto:
 
         bar = Trendbar.from_proto(proto)
 
-        # Values are now floats, divided by 1e5
-        assert bar.low == 1.123
-        assert bar.open == 1.1232
-        assert bar.high == 1.1235
-        assert bar.close == 1.12335
+        assert bar.low == Decimal("1.123")
+        assert bar.open == Decimal("1.1232")
+        assert bar.high == Decimal("1.1235")
+        assert bar.close == Decimal("1.12335")
         assert bar.volume == 1000
         assert bar.period == TrendbarPeriod.M1
 
@@ -62,7 +62,7 @@ class TestTrendbarFromProto:
 
         for proto_value, expected_period in test_cases:
             proto.period = proto_value
-            bar = Trendbar.from_proto(proto, bid_price=10)
+            bar = Trendbar.from_proto(proto, bid_price=Decimal(10))
             assert bar.period == expected_period
 
     def test_from_proto_converts_timestamp(self) -> None:
@@ -77,7 +77,7 @@ class TestTrendbarFromProto:
         proto.delta_close = 0
         proto.volume = 1000
 
-        bar = Trendbar.from_proto(proto, bid_price=10)
+        bar = Trendbar.from_proto(proto, bid_price=Decimal(10))
 
         assert bar.timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
 
@@ -85,22 +85,22 @@ class TestTrendbarFromProto:
 class TestTrendbarValues:
     """Tests for Trendbar direct value access."""
 
-    def test_ohlc_values_as_floats(self) -> None:
-        """Test OHLC values are directly accessible as floats."""
+    def test_ohlc_values_are_decimal(self) -> None:
+        """Test OHLC values are stored and accessible as Decimal."""
         bar = Trendbar(
             timestamp=datetime.now(UTC),
             period=TrendbarPeriod.M1,
-            low=1.12300,
-            open=1.12320,
-            high=1.12350,
-            close=1.12335,
+            low=Decimal("1.12300"),
+            open=Decimal("1.12320"),
+            high=Decimal("1.12350"),
+            close=Decimal("1.12335"),
             volume=1000,
         )
 
-        assert bar.open == 1.12320
-        assert bar.high == 1.12350
-        assert bar.low == 1.12300
-        assert bar.close == 1.12335
+        assert bar.open == Decimal("1.12320")
+        assert bar.high == Decimal("1.12350")
+        assert bar.low == Decimal("1.12300")
+        assert bar.close == Decimal("1.12335")
 
 
 class TestTickDataFromProto:
@@ -114,7 +114,7 @@ class TestTickDataFromProto:
 
         tick = TickData.from_proto(proto)
 
-        assert tick.price == 1.12345
+        assert tick.price == Decimal("1.12345")
         expected_ts = datetime.fromtimestamp(1704067200.0, tz=UTC)
         assert tick.timestamp == expected_ts
 
@@ -142,15 +142,15 @@ class TestTickDataFromProtoList:
         assert len(ticks) == 3
 
         # First tick: absolute values
-        assert ticks[0].price == 1.12345
+        assert ticks[0].price == Decimal("1.12345")
         assert ticks[0].timestamp == datetime.fromtimestamp(1704067200.0, tz=UTC)
 
         # Second tick: first + delta
-        assert ticks[1].price == 1.12355  # 112345 + 10 = 112355 / 1e5
+        assert ticks[1].price == Decimal("1.12355")  # 112345 + 10 = 112355 / 100000
         assert ticks[1].timestamp == datetime.fromtimestamp(1704067201.0, tz=UTC)
 
         # Third tick: second + delta
-        assert ticks[2].price == 1.1235  # 112355 - 5 = 112350 / 1e5
+        assert ticks[2].price == Decimal("1.1235")  # 112355 - 5 = 112350 / 100000
         assert ticks[2].timestamp == datetime.fromtimestamp(1704067201.5, tz=UTC)
 
     def test_from_proto_list_empty(self) -> None:

@@ -30,7 +30,7 @@ from ctrader_api_client.events import SpotEvent
 await client.market_data.subscribe_spots(account_id, [270, 271])
 
 
-# Handle price updates - bid/ask are floats
+# Handle price updates - bid/ask are Decimals
 @client.on(SpotEvent, symbol_id=270)
 async def on_price(event: SpotEvent):
     print(f"Bid: {event.bid}, Ask: {event.ask}")
@@ -86,7 +86,7 @@ trendbars = await client.market_data.get_trendbars(
     to_timestamp=datetime.now(UTC),
 )
 
-# OHLC values are already floats (converted from raw integers)
+# OHLC values are already Decimals (converted from raw integers)
 for bar in trendbars:
     print(f"{bar.timestamp}: O={bar.open} H={bar.high} L={bar.low} C={bar.close} V={bar.volume}")
 ```
@@ -104,7 +104,7 @@ ticks = await client.market_data.get_tick_data(
     quote_type="BID",  # or "ASK"
 )
 
-# Price is already a float
+# Price is already a Decimal
 for tick in ticks:
     print(f"{tick.timestamp}: {tick.price}")
 ```

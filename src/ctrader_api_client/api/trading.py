@@ -194,8 +194,8 @@ class TradingAPI:
         return [
             PositionUnrealizedPnL(
                 position_id=p.position_id,
-                gross_unrealized_pnl=p.gross_unrealized_pn_l / divisor,
-                net_unrealized_pnl=p.net_unrealized_pn_l / divisor,
+                gross_unrealized_pnl=Decimal(p.gross_unrealized_pn_l) / divisor,
+                net_unrealized_pnl=Decimal(p.net_unrealized_pn_l) / divisor,
             )
             for p in response.position_unrealized_pn_l
         ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import (
@@ -63,15 +64,15 @@ class TestOrderFromProto:
         assert order.status == OrderStatus.ACCEPTED
         assert order.volume == 100000
         assert order.time_in_force == TimeInForce.GOOD_TILL_CANCEL
-        assert order.limit_price == 1.12000
+        assert order.limit_price == Decimal("1.12000")
         assert order.stop_price is None
-        assert order.stop_loss == 1.11000
-        assert order.take_profit == 1.15000
+        assert order.stop_loss == Decimal("1.11000")
+        assert order.take_profit == Decimal("1.15000")
         assert order.execution_price is None
         assert order.executed_volume == 0
         assert order.expiration_timestamp == datetime(2024, 1, 2, 0, 0, 0, tzinfo=UTC)
         assert order.position_id == 54321
-        assert order.base_slippage_price == 1.12100
+        assert order.base_slippage_price == Decimal("1.12100")
         assert order.slippage_in_points == 5
         assert order.relative_stop_loss == 100
         assert order.relative_take_profit == 300

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from ctrader_api_client.enums import OrderSide, OrderType, StopTriggerMethod, TimeInForce
 from ctrader_api_client.models import (
@@ -40,7 +41,7 @@ class TestNewOrderRequestToProto:
             side=OrderSide.SELL,
             volume=50000,
             order_type=OrderType.LIMIT,
-            limit_price=1.12500,
+            limit_price=Decimal("1.12500"),
         )
 
         proto = request.to_proto(account_id=12345)
@@ -56,7 +57,7 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.STOP,
-            stop_price=1.13000,
+            stop_price=Decimal("1.13000"),
         )
 
         proto = request.to_proto(account_id=12345)
@@ -71,8 +72,8 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.MARKET,
-            stop_loss=1.11000,
-            take_profit=1.15000,
+            stop_loss=Decimal("1.11000"),
+            take_profit=Decimal("1.15000"),
         )
 
         proto = request.to_proto(account_id=12345)
@@ -96,7 +97,7 @@ class TestNewOrderRequestToProto:
                 side=OrderSide.BUY,
                 volume=100000,
                 order_type=OrderType.LIMIT,
-                limit_price=1.12000,
+                limit_price=Decimal("1.12000"),
                 time_in_force=tif,
             )
 
@@ -111,7 +112,7 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.LIMIT,
-            limit_price=1.12000,
+            limit_price=Decimal("1.12000"),
             time_in_force=TimeInForce.GOOD_TILL_DATE,
             expiration_timestamp=expiration,
         )
@@ -146,7 +147,7 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.MARKET_RANGE,
-            base_slippage_price=1.12000,
+            base_slippage_price=Decimal("1.12000"),
             slippage_in_points=10,
         )
 
@@ -162,8 +163,8 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.MARKET,
-            relative_stop_loss=0.0005,  # 5 pips in price units
-            relative_take_profit=0.001,  # 10 pips in price units
+            relative_stop_loss=Decimal("0.0005"),  # 5 pips in price units
+            relative_take_profit=Decimal("0.001"),  # 10 pips in price units
         )
 
         proto = request.to_proto(account_id=12345)
@@ -179,7 +180,7 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.MARKET,
-            stop_loss=1.11000,
+            stop_loss=Decimal("1.11000"),
             trailing_stop_loss=True,
         )
 
@@ -194,7 +195,7 @@ class TestNewOrderRequestToProto:
             side=OrderSide.BUY,
             volume=100000,
             order_type=OrderType.MARKET,
-            stop_loss=1.11000,
+            stop_loss=Decimal("1.11000"),
             guaranteed_stop_loss=True,
         )
 
@@ -217,7 +218,7 @@ class TestNewOrderRequestToProto:
                 side=OrderSide.BUY,
                 volume=100000,
                 order_type=OrderType.STOP,
-                stop_price=1.13000,
+                stop_price=Decimal("1.13000"),
                 stop_trigger_method=method,
             )
 
@@ -247,7 +248,7 @@ class TestAmendOrderRequestToProto:
         request = AmendOrderRequest(
             order_id=12345,
             volume=50000,
-            limit_price=1.13000,
+            limit_price=Decimal("1.13000"),
         )
 
         proto = request.to_proto(account_id=11111)
@@ -261,8 +262,8 @@ class TestAmendOrderRequestToProto:
         """Test to_proto with stop loss and take profit update."""
         request = AmendOrderRequest(
             order_id=12345,
-            stop_loss=1.11000,
-            take_profit=1.16000,
+            stop_loss=Decimal("1.11000"),
+            take_profit=Decimal("1.16000"),
         )
 
         proto = request.to_proto(account_id=11111)
@@ -302,8 +303,8 @@ class TestAmendPositionRequestToProto:
         """Test to_proto with basic fields."""
         request = AmendPositionRequest(
             position_id=54321,
-            stop_loss=1.11000,
-            take_profit=1.15000,
+            stop_loss=Decimal("1.11000"),
+            take_profit=Decimal("1.15000"),
         )
 
         proto = request.to_proto(account_id=11111)
@@ -329,7 +330,7 @@ class TestAmendPositionRequestToProto:
         """Test to_proto with trailing stop."""
         request = AmendPositionRequest(
             position_id=54321,
-            stop_loss=1.11000,
+            stop_loss=Decimal("1.11000"),
             trailing_stop_loss=True,
         )
 
@@ -341,7 +342,7 @@ class TestAmendPositionRequestToProto:
         """Test to_proto with stop loss trigger method."""
         request = AmendPositionRequest(
             position_id=54321,
-            stop_loss=1.11000,
+            stop_loss=Decimal("1.11000"),
             stop_loss_trigger_method=StopTriggerMethod.OPPOSITE,
         )
 

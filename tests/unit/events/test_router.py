@@ -111,8 +111,8 @@ class TestSpotEventConversion:
         event = received_events[0]
         assert event.account_id == 123
         assert event.symbol_id == 1
-        assert event.bid == 1.23  # 123000 / 1e5
-        assert event.ask == 1.2305  # 123050 / 1e5
+        assert event.bid == Decimal("1.23")  # 123000 / 1e5
+        assert event.ask == Decimal("1.2305")  # 123050 / 1e5
         assert event.trendbar is None
         assert event.timestamp == datetime(2021, 1, 1, 0, 0, 0, tzinfo=UTC)
 

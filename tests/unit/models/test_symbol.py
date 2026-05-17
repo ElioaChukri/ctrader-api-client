@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import TradingMode
@@ -141,16 +142,16 @@ class TestSymbol:
             max_volume=10000000,
             step_volume=1000,
             trading_mode=TradingMode.ENABLED,
-            swap_long=0.0,
-            swap_short=0.0,
+            swap_long=Decimal("0.0"),
+            swap_short=Decimal("0.0"),
         )
 
         # 100000 cents / 100000 lot_size = 1 lot
-        assert symbol.volume_to_lots(100000) == 1.0
+        assert symbol.volume_to_lots(100000) == Decimal("1.0")
         # 10000 cents / 100000 lot_size = 0.1 lots
-        assert symbol.volume_to_lots(10000) == 0.1
+        assert symbol.volume_to_lots(10000) == Decimal("0.1")
         # 1000 cents / 100000 lot_size = 0.01 lots
-        assert symbol.volume_to_lots(1000) == 0.01
+        assert symbol.volume_to_lots(1000) == Decimal("0.01")
 
     def test_lots_to_volume_uses_lot_size(self) -> None:
         """Test lots_to_volume uses symbol's lot_size."""
@@ -163,16 +164,16 @@ class TestSymbol:
             max_volume=10000000,
             step_volume=1000,
             trading_mode=TradingMode.ENABLED,
-            swap_long=0.0,
-            swap_short=0.0,
+            swap_long=Decimal("0.0"),
+            swap_short=Decimal("0.0"),
         )
 
         # 1 lot * 100000 lot_size = 100000 cents
-        assert symbol.lots_to_volume(1.0) == 100000
+        assert symbol.lots_to_volume(Decimal("1.0")) == 100000
         # 0.1 lots * 100000 lot_size = 10000 cents
-        assert symbol.lots_to_volume(0.1) == 10000
+        assert symbol.lots_to_volume(Decimal("0.1")) == 10000
         # 0.01 lots * 100000 lot_size = 1000 cents
-        assert symbol.lots_to_volume(0.01) == 1000
+        assert symbol.lots_to_volume(Decimal("0.01")) == 1000
 
     def test_volume_to_lots_different_lot_sizes(self) -> None:
         """Test volume_to_lots with different lot sizes."""
@@ -186,8 +187,8 @@ class TestSymbol:
             max_volume=10000,
             step_volume=1,
             trading_mode=TradingMode.ENABLED,
-            swap_long=0.0,
-            swap_short=0.0,
+            swap_long=Decimal("0.0"),
+            swap_short=Decimal("0.0"),
         )
 
         # 100 cents / 100 lot_size = 1 lot
@@ -206,11 +207,11 @@ class TestSymbol:
             max_volume=10000000,
             step_volume=1000,
             trading_mode=TradingMode.ENABLED,
-            swap_long=0.0,
-            swap_short=0.0,
+            swap_long=Decimal("0.0"),
+            swap_short=Decimal("0.0"),
         )
 
-        original_lots = 0.5
+        original_lots = Decimal("0.5")
         volume = symbol.lots_to_volume(original_lots)
         result = symbol.volume_to_lots(volume)
         assert result == original_lots

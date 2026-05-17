@@ -52,7 +52,7 @@ await client.market_data.subscribe_trendbars(account_id, 270, TrendbarPeriod.M1)
 
 @client.on(SpotEvent, symbol_id=270)
 async def on_spot(event: SpotEvent):
-    # Prices are floats
+    # Prices are Decimals
     print(f"Bid: {event.bid}, Ask: {event.ask}")
 
     # Trendbar is included when subscribed

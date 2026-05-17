@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from ctrader_api_client.enums import OrderSide, PositionStatus, StopTriggerMethod
@@ -47,18 +48,18 @@ class TestPositionFromProto:
         assert position.symbol_id == 1
         assert position.side == OrderSide.BUY
         assert position.volume == 100000
-        assert position.entry_price == 1.12345
+        assert position.entry_price == Decimal("1.12345")
         assert position.status == PositionStatus.OPEN
         assert position.open_timestamp == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
-        assert position.stop_loss == 1.11000
-        assert position.take_profit == 1.15000
+        assert position.stop_loss == Decimal("1.11")
+        assert position.take_profit == Decimal("1.15")
         assert position.trailing_stop_loss is True
         assert position.guaranteed_stop_loss is False
         assert position.stop_loss_trigger_method == StopTriggerMethod.TRADE
-        assert position.swap == -5.0  # Divided by 10^2
-        assert position.commission == -7.0  # Divided by 10^2
-        assert position.used_margin == 10000.0  # Divided by 10^2
-        assert position.margin_rate == 0.01
+        assert position.swap == Decimal(-5)
+        assert position.commission == Decimal(-7)
+        assert position.used_margin == Decimal(10000)
+        assert position.margin_rate == Decimal("0.01")
         assert position.label == "test_label"
         assert position.comment == "test_comment"
         assert position.last_update_timestamp == datetime(2024, 1, 2, 0, 0, 0, tzinfo=UTC)
