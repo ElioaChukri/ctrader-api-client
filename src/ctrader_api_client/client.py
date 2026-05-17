@@ -454,6 +454,65 @@ class CTraderClient:
 
         return decorator
 
+    @overload
+    def register_handler(
+        self,
+        event_type: type[T_BothFilters],
+        handler: EventHandler[T_BothFilters],
+        *,
+        account_id: int | None = ...,
+        symbol_id: int | None = ...,
+    ) -> None: ...
+
+    @overload
+    def register_handler(
+        self,
+        event_type: type[T_AccountIdOnly],
+        handler: EventHandler[T_AccountIdOnly],
+        *,
+        account_id: int | None = ...,
+    ) -> None: ...
+
+    @overload
+    def register_handler(
+        self,
+        event_type: type[T_NoFilters],
+        handler: EventHandler[T_NoFilters],
+    ) -> None: ...
+
+    def register_handler(
+        self,
+        event_type: type[T],
+        handler: EventHandler[T],
+        *,
+        account_id: int | None = None,
+        symbol_id: int | None = None,
+    ) -> None:
+        """Register an event handler.
+
+        Same as the on() decorator but as a regular method for dynamic registration.
+
+        Args:
+            event_type: The event class to listen for.
+            handler: The async function to call when the event arrives.
+            account_id: Only receive events for this account (optional).
+            symbol_id: Only receive events for this symbol (optional).
+        Example:
+            ```python
+            async def on_eurusd(event: SpotEvent) -> None:
+                print(f"EURUSD: {event.bid}/{event.ask}")
+
+
+            client.register_handler(SpotEvent, on_eurusd, symbol_id=270)
+            ```
+        """
+        self._emitter.subscribe(
+            event_type,
+            handler,
+            account_id=account_id,
+            symbol_id=symbol_id,
+        )
+
     def off(
         self,
         event_type: type[T],
