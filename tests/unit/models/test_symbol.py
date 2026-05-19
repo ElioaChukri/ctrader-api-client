@@ -215,3 +215,22 @@ class TestSymbol:
         volume = symbol.lots_to_volume(original_lots)
         result = symbol.volume_to_lots(volume)
         assert result == original_lots
+
+    def test_quantize(self):
+        """Test that quantize correctly rounds to the symbol's digits."""
+        symbol = Symbol(
+            symbol_id=1,
+            digits=5,
+            pip_position=4,
+            lot_size=100000,
+            min_volume=1000,
+            max_volume=10000000,
+            step_volume=1000,
+            trading_mode=TradingMode.ENABLED,
+            swap_long=Decimal("0.0"),
+            swap_short=Decimal("0.0"),
+        )
+
+        assert symbol.quantize_price(Decimal("1.23456789")) == Decimal("1.23457")
+        assert symbol.quantize_price(Decimal("1.23456123")) == Decimal("1.23456")
+        assert symbol.quantize_price(Decimal("1.23456499")) == Decimal("1.23456")

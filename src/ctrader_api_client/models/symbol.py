@@ -137,6 +137,18 @@ class Symbol(FrozenModel):
         """
         return int(lots * self.lot_size)
 
+    def quantize_price(self, price: Decimal) -> Decimal:
+        """Quantize price to symbol's allowed decimal places
+
+        Args:
+            price: The price to quantize.
+
+        Returns:
+            Quantized price.
+        """
+        quantize_exp = Decimal(10) ** (-self.digits)
+        return price.quantize(quantize_exp)
+
     @classmethod
     def from_proto(cls, proto: ProtoOASymbol) -> Symbol:
         """Create Symbol from proto message.
