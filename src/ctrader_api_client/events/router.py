@@ -180,15 +180,19 @@ class EventRouter:
 
     async def _handle_spot(self, proto: ProtoOASpotEvent) -> None:
         """Convert ProtoOASpotEvent to SpotEvent."""
+
+        # I don't trust the API
+        if proto.trendbar is None:
+            trendbars = []  # type: ignore[unreachable]
+        else:
+            trendbars = [Trendbar.from_proto(tb, bid_price=Decimal(proto.bid)) for tb in proto.trendbar]
         event = SpotEvent(
             account_id=proto.ctid_trader_account_id,
             symbol_id=proto.symbol_id,
             bid=proto.bid / Decimal(100000) if proto.bid else None,
             ask=proto.ask / Decimal(100000) if proto.ask else None,
             timestamp=self._timestamp_to_datetime(proto.timestamp) if proto.timestamp else datetime.now(UTC),
-            trendbar=(
-                Trendbar.from_proto(proto.trendbar[0], bid_price=Decimal(str(proto.bid))) if proto.trendbar else None
-            ),
+            trendbar=trendbars,
         )
         await self._emitter.emit(event)
 

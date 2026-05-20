@@ -32,7 +32,7 @@ class SpotEvent:
     symbol_id: int
     bid: Decimal | None
     ask: Decimal | None
-    trendbar: Trendbar | None
+    trendbar: list[Trendbar]
     timestamp: datetime
 
 

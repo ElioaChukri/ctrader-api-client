@@ -34,7 +34,7 @@ class TestSpotEvent:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=timestamp,
         )
 
@@ -42,7 +42,7 @@ class TestSpotEvent:
         assert event.symbol_id == 1
         assert event.bid == Decimal("1.23000")
         assert event.ask == Decimal("1.23050")
-        assert event.trendbar is None
+        assert len(event.trendbar) == 0
         assert event.timestamp == timestamp
 
     def test_spot_event_is_frozen(self) -> None:
@@ -52,7 +52,7 @@ class TestSpotEvent:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
 
@@ -66,7 +66,7 @@ class TestSpotEvent:
             symbol_id=1,
             bid=None,
             ask=None,
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
 

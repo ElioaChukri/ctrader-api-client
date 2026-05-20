@@ -113,7 +113,7 @@ class TestSpotEventConversion:
         assert event.symbol_id == 1
         assert event.bid == Decimal("1.23")  # 123000 / 1e5
         assert event.ask == Decimal("1.2305")  # 123050 / 1e5
-        assert event.trendbar is None
+        assert len(event.trendbar) == 0
         assert event.timestamp == datetime(2021, 1, 1, 0, 0, 0, tzinfo=UTC)
 
     @pytest.mark.anyio
@@ -140,7 +140,7 @@ class TestSpotEventConversion:
         assert len(received_events) == 1
         assert received_events[0].bid is None
         assert received_events[0].ask is None
-        assert received_events[0].trendbar is None
+        assert len(received_events[0].trendbar) == 0
 
 
 class TestExecutionEventConversion:

@@ -143,7 +143,7 @@ class TestEventEmitterEmit:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -164,7 +164,7 @@ class TestEventEmitterEmit:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -185,7 +185,7 @@ class TestEventEmitterEmit:
             symbol_id=2,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -205,7 +205,7 @@ class TestEventEmitterEmit:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -236,7 +236,7 @@ class TestEventEmitterEmit:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -262,7 +262,7 @@ class TestEventEmitterErrorHandling:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -286,7 +286,7 @@ class TestEventEmitterErrorHandling:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
         await emitter.emit(event)
@@ -311,7 +311,7 @@ class TestEventEmitterErrorHandling:
             symbol_id=1,
             bid=Decimal("1.23000"),
             ask=Decimal("1.23050"),
-            trendbar=None,
+            trendbar=[],
             timestamp=datetime.now(UTC),
         )
 
