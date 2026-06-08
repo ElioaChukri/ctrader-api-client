@@ -257,7 +257,7 @@ class CTraderClient:
         if self._connected:
             return
 
-        logger.info("Connecting to %s:%d", self._config.host, self._config.port)
+        logger.debug("Connecting to %s:%d", self._config.host, self._config.port)
 
         await self._transport.connect()
         await self._protocol.start()
@@ -266,7 +266,7 @@ class CTraderClient:
         self._router.start()
 
         self._connected = True
-        logger.info("Connected successfully")
+        logger.info("Connected to cTrader server at %s:%d", self._config.host, self._config.port)
 
     async def close(self) -> None:
         """Close the connection and clean up resources.
@@ -277,7 +277,7 @@ class CTraderClient:
         if not self._connected:
             return
 
-        logger.info("Closing connection")
+        logger.debug("Closing connection")
 
         self._router.stop()
         await self._auth.stop()
@@ -286,7 +286,7 @@ class CTraderClient:
         await self._transport.close()
 
         self._connected = False
-        logger.info("Connection closed")
+        logger.debug("Connection closed")
 
     async def _emit_ready_event(self, account_id: int, is_reconnect: bool, is_reauth: bool) -> None:
         """Emit ReadyEvent when an account is authenticated.
@@ -313,7 +313,7 @@ class CTraderClient:
         the app and all previously authenticated accounts, then emits
         a ReconnectedEvent so users can restore subscriptions.
         """
-        logger.info("Connection restored, re-authenticating...")
+        logger.debug("Connection restored, re-authenticating...")
 
         # Restart heartbeat monitoring
         await self._heartbeat.restart()
@@ -325,7 +325,7 @@ class CTraderClient:
         try:
             await self._auth.authenticate_app()
             app_auth_restored = True
-            logger.info("App re-authenticated successfully")
+            logger.debug("App re-authenticated successfully")
         except Exception as e:
             logger.error("Failed to re-authenticate app after reconnect: %s", e)
             app_auth_restored = False
@@ -344,7 +344,7 @@ class CTraderClient:
             try:
                 await self._auth.authenticate_account(credentials, reconnect=True)
                 restored.append(account_id)
-                logger.info("Re-authenticated account %d", account_id)
+                logger.debug("Re-authenticated account %d", account_id)
             except Exception as e:
                 logger.error("Failed to re-authenticate account %d: %s", account_id, e)
                 failed.append((account_id, str(e)))

@@ -358,7 +358,7 @@ class Protocol:
             reraise=True,
         ):
             with attempt:
-                logger.info(
+                logger.debug(
                     "Reconnection attempt %d/%d",
                     attempt.retry_state.attempt_number,
                     self._reconnect_attempts,

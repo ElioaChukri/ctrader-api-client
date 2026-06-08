@@ -136,7 +136,7 @@ class EventRouter:
         )
 
         self._started = True
-        logger.info("Event router started")
+        logger.debug("Event router started")
 
     def stop(self) -> None:
         """Idempotent. Unregister all proto event handlers."""
@@ -172,7 +172,7 @@ class EventRouter:
         )
 
         self._started = False
-        logger.info("Event router stopped")
+        logger.debug("Event router stopped")
 
     # -------------------------------------------------------------------------
     # Proto to Event Converters

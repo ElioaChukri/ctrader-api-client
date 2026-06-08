@@ -83,7 +83,7 @@ class Transport:
             raise CTraderConnectionFailedError(self._host, self._port, e) from e
 
         if self._ssl:
-            logger.info("Connected to %s:%d with SSL", self._host, self._port)
+            logger.debug("Connected to %s:%d with SSL", self._host, self._port)
         else:
             logger.warning("Connected to %s:%d without SSL (plaintext)", self._host, self._port)
 

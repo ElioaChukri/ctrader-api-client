@@ -159,7 +159,7 @@ class AuthManager:
             APIError: If authentication fails.
             CTraderConnectionTimeoutError: If request times out.
         """
-        logger.info("Authenticating application")
+        logger.debug("Authenticating application")
 
         request = ProtoOAApplicationAuthReq(
             client_id=self._client_id,
@@ -175,7 +175,7 @@ class AuthManager:
             )
 
         self._app_authenticated = True
-        logger.info("Application authenticated successfully")
+        logger.debug("Application authenticated successfully")
         return response
 
     async def authenticate_account(
@@ -200,9 +200,9 @@ class AuthManager:
             CTraderConnectionTimeoutError: If request times out.
         """
         if reauth:
-            logger.info("Re-authenticating account %d", credentials.account_id)
+            logger.debug("Re-authenticating account %d", credentials.account_id)
         else:
-            logger.info("Authenticating account %d", credentials.account_id)
+            logger.debug("Authenticating account %d", credentials.account_id)
 
         request = ProtoOAAccountAuthReq(
             ctid_trader_account_id=credentials.account_id,
@@ -219,7 +219,7 @@ class AuthManager:
 
         # Store credentials for refresh monitoring
         self._accounts[credentials.account_id] = credentials
-        logger.info("Account %d authenticated successfully", credentials.account_id)
+        logger.debug("Account %d authenticated successfully", credentials.account_id)
 
         # Notify callback
         if self._on_account_ready is not None:
@@ -339,7 +339,7 @@ class AuthManager:
             APIError: If authentication fails.
             CTraderConnectionTimeoutError: If request times out.
         """
-        logger.info("Authenticating by trader login %d", trader_login)
+        logger.debug("Authenticating by trader login %d", trader_login)
 
         # Resolve trader_login to account_id
         account_id = await self.resolve_account_id(access_token, trader_login, timeout=timeout)
@@ -368,7 +368,7 @@ class AuthManager:
         """
         if account_id in self._accounts:
             del self._accounts[account_id]
-            logger.info("Account %d removed from auth manager", account_id)
+            logger.debug("Account %d removed from auth manager", account_id)
             return True
         return False
 
@@ -417,7 +417,7 @@ class AuthManager:
                         continue
 
                     if credentials.expires_soon(self._refresh_buffer):
-                        logger.info(
+                        logger.debug(
                             "Token for account %d expires soon (%.0fs remaining), refreshing",
                             account_id,
                             credentials.time_until_expiry(),
@@ -481,7 +481,7 @@ class AuthManager:
                     )
                     self._accounts[account_id] = new_credentials
 
-                    logger.info(
+                    logger.debug(
                         "Token refreshed for account %d, new expiry in %ds",
                         account_id,
                         response.expires_in,
