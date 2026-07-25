@@ -30,6 +30,7 @@ from ..exceptions import (
 )
 from ..models import AccountSummary
 from .credentials import AccountCredentials
+from .trigger import AuthTrigger
 
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TokenRefreshCallback = Callable[[AccountCredentials], Awaitable[None]]
-AccountReadyCallback = Callable[[int, bool, bool], Awaitable[None]]  # (account_id, is_reconnect, is_reauth)
+AccountReadyCallback = Callable[[int, AuthTrigger], Awaitable[None]]  # (account_id, trigger)
 
 
 class AuthManager:
@@ -77,6 +78,8 @@ class AuthManager:
         refresh_retry_attempts: int = 3,
         refresh_retry_min_wait: float = 1.0,
         refresh_retry_max_wait: float = 30.0,
+        reauth_retry_min_wait: float = 1.0,
+        reauth_retry_max_wait: float = 60.0,
         on_tokens_refreshed: TokenRefreshCallback | None = None,
         on_account_ready: AccountReadyCallback | None = None,
     ) -> None:
@@ -96,10 +99,14 @@ class AuthManager:
                 Defaults to 1.0.
             refresh_retry_max_wait: Maximum wait between retries (seconds).
                 Defaults to 30.0.
+            reauth_retry_min_wait: Initial backoff between account recovery
+                re-auth attempts (seconds). Defaults to 1.0.
+            reauth_retry_max_wait: Maximum backoff between account recovery
+                re-auth attempts (seconds). Defaults to 60.0.
             on_tokens_refreshed: Async callback invoked when tokens are refreshed.
                 Receives the new AccountCredentials. Use this to persist tokens.
             on_account_ready: Async callback invoked when an account is authenticated.
-                Receives (account_id, is_reconnect). Use this to perform any initial client setup.
+                Receives (account_id, trigger). Use this to perform any initial client setup.
         """
         self._protocol = protocol
         self._client_id = client_id
@@ -109,11 +116,20 @@ class AuthManager:
         self._retry_attempts = refresh_retry_attempts
         self._retry_min_wait = refresh_retry_min_wait
         self._retry_max_wait = refresh_retry_max_wait
+        self._reauth_retry_min_wait = reauth_retry_min_wait
+        self._reauth_retry_max_wait = reauth_retry_max_wait
         self._on_tokens_refreshed = on_tokens_refreshed
         self._on_account_ready = on_account_ready
 
         # Account storage
         self._accounts: dict[int, AccountCredentials] = {}
+
+        # Accounts with a live, authorized server-side session
+        self._authorized_accounts: set[int] = set()
+
+        # Accounts awaiting recovery re-auth after a server-side disconnect
+        self._pending_reauth: set[int] = set()
+        self._reauth_signal = anyio.Event()
 
         # Background task management
         self._task_group: anyio.abc.TaskGroup | None = None
@@ -130,8 +146,24 @@ class AuthManager:
 
     @property
     def authenticated_accounts(self) -> list[int]:
-        """List of authenticated account IDs."""
+        """List of account IDs the manager holds credentials for."""
         return list(self._accounts.keys())
+
+    @property
+    def authorized_accounts(self) -> list[int]:
+        """List of account IDs with a live, authorized server-side session."""
+        return list(self._authorized_accounts)
+
+    def is_account_authorized(self, account_id: int) -> bool:
+        """Whether the account currently has a live, authorized session.
+
+        Returns False after a server-side account disconnect until recovery
+        re-authentication succeeds.
+
+        Args:
+            account_id: The cTID trader account ID.
+        """
+        return account_id in self._authorized_accounts
 
     def get_credentials(self, account_id: int) -> AccountCredentials | None:
         """Get credentials for an account.
@@ -179,7 +211,10 @@ class AuthManager:
         return response
 
     async def authenticate_account(
-        self, credentials: AccountCredentials, timeout: float = 30.0, reauth: bool = False, reconnect: bool = False
+        self,
+        credentials: AccountCredentials,
+        timeout: float = 30.0,
+        trigger: AuthTrigger = AuthTrigger.INITIAL,
     ) -> ProtoOAAccountAuthRes:
         """Authenticate a trading account.
 
@@ -188,9 +223,9 @@ class AuthManager:
         Args:
             credentials: The account credentials including tokens.
             timeout: Request timeout in seconds.
-            reauth: Whether this is a re-authentication (token refresh) or initial auth.
-            reconnect: Whether this authentication is happening during a connection reconnect. This can be used
-                to differentiate between a token refresh and a full reconnect scenario in the account ready callback.
+            trigger: Why the authentication is happening. Threaded through to
+                the account-ready callback so subscription restoration can be
+                driven correctly (see AuthTrigger).
 
         Returns:
             The authentication response from the server.
@@ -199,10 +234,10 @@ class AuthManager:
             APIError: If authentication fails.
             CTraderConnectionTimeoutError: If request times out.
         """
-        if reauth:
-            logger.debug("Re-authenticating account %d", credentials.account_id)
-        else:
+        if trigger is AuthTrigger.INITIAL:
             logger.debug("Authenticating account %d", credentials.account_id)
+        else:
+            logger.debug("Re-authenticating account %d (%s)", credentials.account_id, trigger.value)
 
         request = ProtoOAAccountAuthReq(
             ctid_trader_account_id=credentials.account_id,
@@ -217,14 +252,16 @@ class AuthManager:
                 description=f"Expected ProtoOAAccountAuthRes, got {type(response).__name__}",
             )
 
-        # Store credentials for refresh monitoring
+        # Store credentials for refresh monitoring and mark the session live
         self._accounts[credentials.account_id] = credentials
+        self._authorized_accounts.add(credentials.account_id)
+        self._pending_reauth.discard(credentials.account_id)
         logger.debug("Account %d authenticated successfully", credentials.account_id)
 
         # Notify callback
         if self._on_account_ready is not None:
             try:
-                await self._on_account_ready(credentials.account_id, reconnect, reauth)
+                await self._on_account_ready(credentials.account_id, trigger)
             except Exception as e:
                 logger.warning(
                     "Account ready callback failed for account %d: %s",
@@ -368,15 +405,42 @@ class AuthManager:
         """
         if account_id in self._accounts:
             del self._accounts[account_id]
+            self._authorized_accounts.discard(account_id)
+            self._pending_reauth.discard(account_id)
             logger.debug("Account %d removed from auth manager", account_id)
             return True
         return False
 
-    async def start(self) -> None:
-        """Start the token refresh monitor.
+    def handle_account_disconnect(self, account_id: int) -> None:
+        """Handle a server-side account disconnect.
 
-        This runs a background task that periodically checks for expiring
-        tokens and refreshes them automatically.
+        Marks the account's session as no longer authorized and schedules
+        recovery re-authentication on the existing connection. Idempotent while
+        a recovery is already pending for the account.
+
+        Args:
+            account_id: The cTID trader account ID reported as disconnected.
+        """
+        if account_id not in self._accounts:
+            return
+
+        self._authorized_accounts.discard(account_id)
+
+        if account_id in self._pending_reauth:
+            return
+
+        self._pending_reauth.add(account_id)
+        self._reauth_signal.set()
+        logger.warning(
+            "Account %d disconnected by server; scheduling re-authentication",
+            account_id,
+        )
+
+    async def start(self) -> None:
+        """Start the background monitors.
+
+        Runs the token refresh monitor and the account recovery monitor, which
+        re-authenticates accounts dropped by a server-side disconnect.
         """
         if self._running:
             return
@@ -385,10 +449,11 @@ class AuthManager:
         self._task_group = anyio.create_task_group()
         await self._task_group.__aenter__()
         self._task_group.start_soon(self._refresh_loop)
-        logger.debug("Token refresh monitor started")
+        self._task_group.start_soon(self._reauth_loop)
+        logger.debug("Auth monitors started")
 
     async def stop(self) -> None:
-        """Stop the token refresh monitor."""
+        """Stop the background monitors."""
         self._running = False
 
         if self._task_scope is not None:
@@ -402,7 +467,49 @@ class AuthManager:
                 pass
             self._task_group = None
 
-        logger.debug("Token refresh monitor stopped")
+        self._authorized_accounts.clear()
+        self._pending_reauth.clear()
+
+        logger.debug("Auth monitors stopped")
+
+    async def _reauth_loop(self) -> None:
+        """Recover accounts dropped by a server-side account disconnect.
+
+        Waits for accounts flagged by handle_account_disconnect, then
+        re-authenticates them on the existing connection with capped
+        exponential backoff, retrying indefinitely until each succeeds or the
+        manager stops. A successful re-auth restores authorized state and emits
+        a ReadyEvent so subscriptions can be restored.
+        """
+        while self._running:
+            await self._reauth_signal.wait()
+            self._reauth_signal = anyio.Event()
+
+            backoff = self._reauth_retry_min_wait
+            while self._running and self._pending_reauth:
+                recovered_any = False
+                for account_id in list(self._pending_reauth):
+                    credentials = self._accounts.get(account_id)
+                    if credentials is None:
+                        self._pending_reauth.discard(account_id)
+                        continue
+                    try:
+                        await self.authenticate_account(credentials, trigger=AuthTrigger.ACCOUNT_REAUTH)
+                        recovered_any = True
+                    except Exception as e:
+                        logger.warning(
+                            "Recovery re-authentication for account %d failed, will retry: %s",
+                            account_id,
+                            e,
+                        )
+
+                if not self._pending_reauth:
+                    break
+
+                if recovered_any:
+                    backoff = self._reauth_retry_min_wait
+                await anyio.sleep(backoff)
+                backoff = min(backoff * 2, self._reauth_retry_max_wait)
 
     async def _refresh_loop(self) -> None:
         """Periodically check and refresh expiring tokens."""
@@ -488,7 +595,7 @@ class AuthManager:
                     )
 
                     # Re-authenticate the account with the new token
-                    await self.authenticate_account(new_credentials, reauth=True)
+                    await self.authenticate_account(new_credentials, trigger=AuthTrigger.TOKEN_REFRESH)
 
                     # Notify callback
                     if self._on_tokens_refreshed is not None:

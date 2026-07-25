@@ -8,9 +8,15 @@ import pytest
 
 from ctrader_api_client import ClientConfig, CTraderClient
 from ctrader_api_client.api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
-from ctrader_api_client.auth import AuthManager
+from ctrader_api_client.auth import AuthManager, AuthTrigger
 from ctrader_api_client.connection import HeartbeatManager, Protocol, Transport
-from ctrader_api_client.events import EventEmitter, EventRouter, SpotEvent
+from ctrader_api_client.events import (
+    AccountDisconnectEvent,
+    EventEmitter,
+    EventRouter,
+    ReadyEvent,
+    SpotEvent,
+)
 
 
 @pytest.fixture
@@ -489,3 +495,55 @@ class TestCTraderClientEventOff:
         result = client.off(SpotEvent, my_handler)
 
         assert result is False
+
+
+class TestEmitReadyEvent:
+    """Test CTraderClient._emit_ready_event() trigger handling."""
+
+    @pytest.mark.anyio
+    async def test_token_refresh_suppresses_ready_event(self, config: ClientConfig):
+        client = CTraderClient(config)
+        client._emitter.emit = AsyncMock()
+
+        await client._emit_ready_event(1, AuthTrigger.TOKEN_REFRESH)
+
+        client._emitter.emit.assert_not_called()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("trigger", "expected_is_reconnect"),
+        [
+            (AuthTrigger.INITIAL, False),
+            (AuthTrigger.RECONNECT, True),
+            (AuthTrigger.ACCOUNT_REAUTH, True),
+        ],
+    )
+    async def test_emits_ready_event_with_expected_flag(
+        self,
+        config: ClientConfig,
+        trigger: AuthTrigger,
+        expected_is_reconnect: bool,
+    ):
+        client = CTraderClient(config)
+        client._emitter.emit = AsyncMock()
+
+        await client._emit_ready_event(7, trigger)
+
+        client._emitter.emit.assert_called_once()
+        event = client._emitter.emit.call_args[0][0]
+        assert isinstance(event, ReadyEvent)
+        assert event.account_id == 7
+        assert event.is_reconnect is expected_is_reconnect
+
+
+class TestAccountDisconnectRouting:
+    """Test that account disconnect events drive recovery re-auth."""
+
+    @pytest.mark.anyio
+    async def test_account_disconnect_event_routes_to_auth(self, config: ClientConfig):
+        client = CTraderClient(config)
+        client._auth.handle_account_disconnect = MagicMock()
+
+        await client._emitter.emit(AccountDisconnectEvent(account_id=555))
+
+        client._auth.handle_account_disconnect.assert_called_once_with(555)

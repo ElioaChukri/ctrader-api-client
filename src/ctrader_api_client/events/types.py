@@ -197,7 +197,11 @@ class ClientDisconnectEvent:
 class AccountDisconnectEvent:
     """Account disconnect event.
 
-    Emitted when a specific account session is terminated.
+    Emitted when a specific account session is terminated by the server while
+    the underlying connection stays up. The client handles recovery
+    automatically: it re-authenticates the account on the existing connection
+    with backoff until it succeeds, then emits a ReadyEvent. This event is
+    informational; no user action is required to restore the session.
 
     Attributes:
         account_id: The cTID trader account ID.
@@ -287,12 +291,17 @@ class ReconnectedEvent:
 class ReadyEvent:
     """Emitted when an account is authenticated and ready for use.
 
-    Fired after both initial authentication and reconnection re-authentication.
-    Use this to set up subscriptions that should persist across reconnections.
+    Fired whenever a server-side session is (re)established and subscriptions
+    must be (re)applied: initial authentication, re-authentication after a
+    transport reconnection, and recovery after a server-side account
+    disconnect. It is not fired for token-refresh re-auth, where the session
+    and its subscriptions remain intact. Use this to set up subscriptions that
+    should persist across reconnections.
 
     Attributes:
         account_id: The cTID trader account ID that is now ready.
-        is_reconnect: True if this follows a reconnection, False for initial auth.
+        is_reconnect: True if this follows a reconnection or account-disconnect
+            recovery, False for initial authentication.
     """
 
     account_id: int

@@ -167,18 +167,25 @@ if __name__ == "__main__":
 
 ## Handling Reconnections
 
-The client automatically reconnects when the connection drops. Use `ReadyEvent` to restore subscriptions:
+The client automatically reconnects when the connection drops, and also recovers
+from server-side account disconnects (where the account session is dropped but
+the connection stays up). In both cases it re-authenticates and emits a
+`ReadyEvent`. Use `ReadyEvent` to restore subscriptions:
 
 ```python
 @client.on(ReadyEvent)
 async def on_ready(event: ReadyEvent):
-    """Called on initial auth AND after reconnection."""
+    """Called on initial auth, after reconnection, and after account recovery."""
     # Set up subscriptions here - they persist across reconnects
     await client.market_data.subscribe_spots(event.account_id, [270, 271, 272])
 
     if event.is_reconnect:
-        print("Connection restored!")
+        print("Session restored!")
 ```
+
+You can check whether an account currently has a live, authorized session with
+`client.is_account_authorized(account_id)` — distinct from the transport-level
+`client.is_connected`.
 
 For additional reconnection information:
 

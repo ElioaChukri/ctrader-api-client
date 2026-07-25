@@ -38,6 +38,7 @@ Example:
     ```
 """
 
+from .auth import AuthTrigger
 from .client import CTraderClient
 from .config import ClientConfig
 
@@ -54,6 +55,7 @@ from .enums import (
 
 __all__ = [
     "AccountType",
+    "AuthTrigger",
     "CTraderClient",
     "ClientConfig",
     "ExecutionType",

@@ -164,7 +164,7 @@ async def on_spot(event: SpotEvent):
 async def on_execution(event: ExecutionEvent):
     print(f"Order {event.order_id}: {event.execution_type}")
 
-# Account ready (fires on initial auth and after reconnection)
+# Account ready (fires on initial auth, after reconnection, and after account-disconnect recovery)
 @client.on(ReadyEvent)
 async def on_ready(event: ReadyEvent):
     # Set up subscriptions here
@@ -205,6 +205,13 @@ The client automatically handles connection drops:
 2. Re-authenticates the app and all accounts
 3. Emits `ReadyEvent` for each restored account (for resubscribing to market data)
 4. Emits `ReconnectedEvent` with summary of restored/failed accounts
+
+It also handles **server-side account disconnects** (e.g. a broker dropping the
+account session over the weekend while the connection stays up): the account is
+re-authenticated on the existing connection with backoff until it succeeds, then
+a `ReadyEvent` is emitted so subscriptions can be restored. Account
+authorization is observable via `client.is_account_authorized(account_id)`,
+which is distinct from the transport-level `client.is_connected`.
 
 Use `ReadyEvent` to set up subscriptions that persist across reconnections.
 

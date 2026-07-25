@@ -18,6 +18,7 @@ from ctrader_api_client._internal.proto import (
 )
 from ctrader_api_client.auth.credentials import AccountCredentials
 from ctrader_api_client.auth.manager import AuthManager
+from ctrader_api_client.auth.trigger import AuthTrigger
 from ctrader_api_client.connection.protocol import Protocol
 from ctrader_api_client.exceptions import AccountNotFoundError, APIError, TokenRefreshError
 
@@ -773,3 +774,189 @@ class TestAuthenticateByTraderLogin:
         assert mock_protocol.send_request.call_count == 2
         for call in mock_protocol.send_request.call_args_list:
             assert call[1]["timeout"] == 45.0
+
+
+class TestAuthorizedState:
+    """Tests for account authorization tracking."""
+
+    @pytest.mark.anyio
+    async def test_authenticate_marks_account_authorized(
+        self,
+        mock_protocol: MagicMock,
+        sample_credentials: AccountCredentials,
+    ) -> None:
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(
+            ctid_trader_account_id=sample_credentials.account_id
+        )
+
+        auth = AuthManager(protocol=mock_protocol, client_id="test", client_secret="test")
+
+        await auth.authenticate_account(sample_credentials)
+
+        assert auth.is_account_authorized(sample_credentials.account_id) is True
+        assert sample_credentials.account_id in auth.authorized_accounts
+
+    @pytest.mark.anyio
+    async def test_handle_disconnect_deauthorizes_known_account(
+        self,
+        mock_protocol: MagicMock,
+        sample_credentials: AccountCredentials,
+    ) -> None:
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(
+            ctid_trader_account_id=sample_credentials.account_id
+        )
+
+        auth = AuthManager(protocol=mock_protocol, client_id="test", client_secret="test")
+        await auth.authenticate_account(sample_credentials)
+
+        auth.handle_account_disconnect(sample_credentials.account_id)
+
+        assert auth.is_account_authorized(sample_credentials.account_id) is False
+        assert sample_credentials.account_id in auth._pending_reauth
+
+    def test_handle_disconnect_ignores_unknown_account(self, mock_protocol: MagicMock) -> None:
+        auth = AuthManager(protocol=mock_protocol, client_id="test", client_secret="test")
+
+        auth.handle_account_disconnect(99999)
+
+        assert 99999 not in auth._pending_reauth
+
+    @pytest.mark.anyio
+    async def test_handle_disconnect_is_idempotent(
+        self,
+        mock_protocol: MagicMock,
+        sample_credentials: AccountCredentials,
+    ) -> None:
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(
+            ctid_trader_account_id=sample_credentials.account_id
+        )
+
+        auth = AuthManager(protocol=mock_protocol, client_id="test", client_secret="test")
+        await auth.authenticate_account(sample_credentials)
+
+        auth.handle_account_disconnect(sample_credentials.account_id)
+        auth.handle_account_disconnect(sample_credentials.account_id)
+
+        assert auth._pending_reauth == {sample_credentials.account_id}
+
+    @pytest.mark.anyio
+    async def test_reconnect_reauth_clears_pending_recovery(
+        self,
+        mock_protocol: MagicMock,
+        sample_credentials: AccountCredentials,
+    ) -> None:
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(
+            ctid_trader_account_id=sample_credentials.account_id
+        )
+
+        auth = AuthManager(protocol=mock_protocol, client_id="test", client_secret="test")
+        await auth.authenticate_account(sample_credentials)
+        auth.handle_account_disconnect(sample_credentials.account_id)
+
+        assert sample_credentials.account_id in auth._pending_reauth
+        assert auth.is_account_authorized(sample_credentials.account_id) is False
+
+        # The transport-reconnect path re-authenticates the account directly.
+        await auth.authenticate_account(sample_credentials, trigger=AuthTrigger.RECONNECT)
+
+        assert sample_credentials.account_id not in auth._pending_reauth
+        assert auth.is_account_authorized(sample_credentials.account_id) is True
+
+
+class TestReauthLoop:
+    """Tests for the account recovery re-auth loop."""
+
+    @pytest.mark.anyio
+    async def test_recovers_disconnected_account(self, mock_protocol: MagicMock) -> None:
+        ready_calls: list[tuple[int, AuthTrigger]] = []
+
+        async def on_ready(account_id: int, trigger: AuthTrigger) -> None:
+            ready_calls.append((account_id, trigger))
+
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+            reauth_retry_min_wait=0.01,
+            reauth_retry_max_wait=0.02,
+            on_account_ready=on_ready,
+        )
+        creds = AccountCredentials(1, "token", "refresh", time.time() + 3600)
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(ctid_trader_account_id=1)
+
+        await auth.authenticate_account(creds)
+        await auth.start()
+        try:
+            auth.handle_account_disconnect(1)
+            assert auth.is_account_authorized(1) is False
+
+            with anyio.fail_after(1):
+                while not auth.is_account_authorized(1):
+                    await anyio.sleep(0.01)
+
+            assert auth.is_account_authorized(1) is True
+            assert 1 not in auth._pending_reauth
+        finally:
+            await auth.stop()
+
+        assert (1, AuthTrigger.ACCOUNT_REAUTH) in ready_calls
+
+    @pytest.mark.anyio
+    async def test_recovery_retries_until_success(self, mock_protocol: MagicMock) -> None:
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+            reauth_retry_min_wait=0.01,
+            reauth_retry_max_wait=0.02,
+        )
+        creds = AccountCredentials(1, "token", "refresh", time.time() + 3600)
+
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(ctid_trader_account_id=1)
+        await auth.authenticate_account(creds)
+
+        await auth.start()
+        try:
+            # Two failures, then a successful recovery re-auth.
+            mock_protocol.send_request.side_effect = [
+                APIError("CONNECTION_CLOSED"),
+                APIError("CONNECTION_CLOSED"),
+                ProtoOAAccountAuthRes(ctid_trader_account_id=1),
+            ]
+            auth.handle_account_disconnect(1)
+
+            with anyio.fail_after(1):
+                while not auth.is_account_authorized(1):
+                    await anyio.sleep(0.01)
+
+            assert auth.is_account_authorized(1) is True
+            # Two failed attempts plus the successful one.
+            assert mock_protocol.send_request.call_count >= 3
+        finally:
+            await auth.stop()
+
+    @pytest.mark.anyio
+    async def test_stop_clears_state_while_recovery_pending(self, mock_protocol: MagicMock) -> None:
+        auth = AuthManager(
+            protocol=mock_protocol,
+            client_id="test",
+            client_secret="test",
+            reauth_retry_min_wait=5.0,
+            reauth_retry_max_wait=5.0,
+        )
+        creds = AccountCredentials(1, "token", "refresh", time.time() + 3600)
+
+        mock_protocol.send_request.return_value = ProtoOAAccountAuthRes(ctid_trader_account_id=1)
+        await auth.authenticate_account(creds)
+
+        # Recovery re-auth keeps failing, so the account stays pending.
+        mock_protocol.send_request.side_effect = APIError("CONNECTION_CLOSED")
+
+        await auth.start()
+        auth.handle_account_disconnect(1)
+        await anyio.sleep(0.02)  # allow one failed attempt before the long backoff
+        await auth.stop()
+
+        assert auth._running is False
+        assert auth._authorized_accounts == set()
+        assert auth._pending_reauth == set()

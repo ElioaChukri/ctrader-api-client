@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, overload
 
 from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
-from .auth import AuthManager
+from .auth import AuthManager, AuthTrigger
 from .config import ClientConfig
 from .connection import HeartbeatManager, Protocol, Transport
 from .events import (
@@ -170,6 +170,9 @@ class CTraderClient:
         # Set up reconnection handler
         self._protocol._on_reconnect = self._handle_reconnect
 
+        # Recover accounts dropped by a server-side disconnect
+        self._emitter.subscribe(AccountDisconnectEvent, self._handle_account_disconnect)
+
     # -------------------------------------------------------------------------
     # Properties
     # -------------------------------------------------------------------------
@@ -229,8 +232,20 @@ class CTraderClient:
 
     @property
     def is_connected(self) -> bool:
-        """Whether the client is connected to the server."""
+        """Whether the client is connected to the server (transport level)."""
         return self._connected and self._transport.is_connected
+
+    def is_account_authorized(self, account_id: int) -> bool:
+        """Whether the account currently has a live, authorized session.
+
+        Returns False after a server-side account disconnect until recovery
+        re-authentication succeeds. Distinct from is_connected, which only
+        reflects the transport-level connection.
+
+        Args:
+            account_id: The cTID trader account ID.
+        """
+        return self._auth.is_account_authorized(account_id)
 
     @property
     def protocol(self) -> Protocol:
@@ -288,23 +303,28 @@ class CTraderClient:
         self._connected = False
         logger.debug("Connection closed")
 
-    async def _emit_ready_event(self, account_id: int, is_reconnect: bool, is_reauth: bool) -> None:
+    async def _emit_ready_event(self, account_id: int, trigger: AuthTrigger) -> None:
         """Emit ReadyEvent when an account is authenticated.
 
-        Called by AuthManager after successful account authentication.
-
-        Does NOT emit if this is a re-auth with no reconnection (e.g. token refresh), since subscriptions
-        are not lost in that case and users don't need to restore them.
+        Called by AuthManager after successful account authentication. Emitted
+        for every authentication that (re)establishes a server-side session and
+        therefore requires subscriptions to be (re)applied: INITIAL, RECONNECT,
+        and ACCOUNT_REAUTH. Suppressed for TOKEN_REFRESH, where the session and
+        its subscriptions remain intact.
 
         Args:
             account_id: The authenticated account ID.
-            is_reconnect: True if this is a re-authentication after reconnection.
+            trigger: Why the authentication occurred.
         """
-        if is_reauth and not is_reconnect:
-            # Don't emit ReadyEvent for token refresh re-auth, since subscriptions are not lost
+        if trigger is AuthTrigger.TOKEN_REFRESH:
             return
 
+        is_reconnect = trigger in (AuthTrigger.RECONNECT, AuthTrigger.ACCOUNT_REAUTH)
         await self._emitter.emit(ReadyEvent(account_id=account_id, is_reconnect=is_reconnect))
+
+    async def _handle_account_disconnect(self, event: AccountDisconnectEvent) -> None:
+        """Route a server-side account disconnect into recovery re-auth."""
+        self._auth.handle_account_disconnect(event.account_id)
 
     async def _handle_reconnect(self) -> None:
         """Handle automatic reconnection by re-authenticating.
@@ -342,7 +362,7 @@ class CTraderClient:
         # Re-authenticate all previously authenticated accounts
         for account_id, credentials in list(self._auth._accounts.items()):
             try:
-                await self._auth.authenticate_account(credentials, reconnect=True)
+                await self._auth.authenticate_account(credentials, trigger=AuthTrigger.RECONNECT)
                 restored.append(account_id)
                 logger.debug("Re-authenticated account %d", account_id)
             except Exception as e:

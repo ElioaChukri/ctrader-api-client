@@ -85,7 +85,9 @@ async def on_spot(event: SpotEvent):
     options:
       show_source: false
 
-**Use this to set up subscriptions that persist across reconnections:**
+**Use this to set up subscriptions that persist across reconnections.** It fires
+on initial auth, after a transport reconnection, and after recovery from a
+server-side account disconnect — `is_reconnect` is `True` for the latter two:
 
 ```python
 @client.on(ReadyEvent)
@@ -93,8 +95,18 @@ async def on_ready(event: ReadyEvent):
     await client.market_data.subscribe_spots(event.account_id, [270])
 
     if event.is_reconnect:
-        print("Connection restored!")
+        print("Session restored!")
 ```
+
+`ReadyEvent` emission is driven by why authentication occurred, expressed as an
+`AuthTrigger`. It is emitted for `INITIAL`, `RECONNECT`, and `ACCOUNT_REAUTH`
+(all of which lose or re-establish subscriptions), and suppressed for
+`TOKEN_REFRESH` (session intact).
+
+::: ctrader_api_client.auth.AuthTrigger
+    options:
+      show_source: false
+      members: true
 
 ::: ctrader_api_client.events.TraderUpdateEvent
     options:
@@ -136,6 +148,11 @@ async def on_reconnected(event: ReconnectedEvent):
 ::: ctrader_api_client.events.AccountDisconnectEvent
     options:
       show_source: false
+
+The client recovers from this automatically — it re-authenticates the account on
+the existing connection with backoff and emits a `ReadyEvent` on success. The
+event is informational; subscribe to it only if you want to observe or log the
+drop. Check current authorization with `client.is_account_authorized(account_id)`.
 
 ::: ctrader_api_client.events.TokenInvalidatedEvent
     options:
