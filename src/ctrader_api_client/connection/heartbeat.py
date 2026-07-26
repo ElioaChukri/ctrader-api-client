@@ -84,6 +84,14 @@ class HeartbeatManager:
         Resets the heartbeat timer and spawns a new heartbeat loop.
         Should be called after the protocol has reconnected.
         """
+        # Cancel any heartbeat loop still running from the previous connection.
+        # When a drop is detected by the reader loop (not by a heartbeat
+        # timeout/send failure), the old loop is merely asleep and would
+        # otherwise survive the reconnect, leaving two loops running and
+        # accumulating one extra on every reconnect.
+        if self._task_scope is not None:
+            self._task_scope.cancel()
+
         self._last_received = time.monotonic()
         if self._task_group is not None:
             self._task_group.start_soon(self._heartbeat_loop)
@@ -121,5 +129,8 @@ class HeartbeatManager:
                     logger.debug("Heartbeat sent to server")
                 except Exception as e:
                     logger.warning("Failed to send heartbeat: %s", e)
-                    # Protocol will handle reconnection
+                    # A failed write can be the first (or only) sign of a
+                    # half-open connection, so drive reconnection explicitly
+                    # instead of relying on the reader loop to notice.
+                    await self._protocol.handle_disconnect()
                     return

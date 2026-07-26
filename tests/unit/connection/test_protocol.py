@@ -417,3 +417,86 @@ class TestReconnect:
         await protocol._reconnect()
 
         assert call_count == 3
+
+    @pytest.mark.anyio
+    async def test_reader_triggered_disconnect_actually_reconnects(self, mock_transport: MagicMock) -> None:
+        """Regression: a drop detected by the reader loop must fully reconnect.
+
+        Previously ``handle_disconnect`` ran inline and cancelled the reader
+        loop's own cancel scope, aborting the reconnection at its first
+        checkpoint so the client stayed offline forever.
+        """
+        # The stream reports EOF once (server closed the socket), then blocks so
+        # the restarted reader parks on a healthy connection instead of looping.
+        first_read = True
+
+        async def receive(_num_bytes: int) -> bytes:
+            nonlocal first_read
+            if first_read:
+                first_read = False
+                raise anyio.EndOfStream
+            await anyio.sleep_forever()
+
+        mock_stream = AsyncMock()
+        mock_stream.receive = receive
+        mock_transport.stream = mock_stream
+
+        # close() must contain a real suspension point (the true transport awaits
+        # stream.aclose()). That checkpoint is exactly where the pre-fix,
+        # self-cancelling handle_disconnect got aborted before reaching
+        # _reconnect() — an AsyncMock close() never suspends and would hide the bug.
+        close_calls = 0
+
+        async def close_with_checkpoint() -> None:
+            nonlocal close_calls
+            close_calls += 1
+            await anyio.sleep(0)
+
+        mock_transport.close = close_with_checkpoint
+
+        reconnected = anyio.Event()
+
+        async def on_reconnect() -> None:
+            reconnected.set()
+
+        protocol = Protocol(
+            mock_transport,
+            reconnect_attempts=3,
+            reconnect_min_wait=0.01,
+            reconnect_max_wait=0.02,
+        )
+        protocol._on_reconnect = on_reconnect
+
+        await protocol.start()
+        try:
+            with anyio.fail_after(2):
+                await reconnected.wait()
+
+            assert close_calls >= 1
+            assert mock_transport.connect.await_count >= 1
+            assert protocol._running is True
+            assert protocol._reconnecting is False
+        finally:
+            await protocol.stop()
+
+    @pytest.mark.anyio
+    async def test_handle_disconnect_noop_while_already_reconnecting(self, mock_transport: MagicMock) -> None:
+        """Concurrent disconnect reports collapse into a single reconnection."""
+        protocol = Protocol(mock_transport)
+        protocol._running = True
+        protocol._reconnecting = True
+
+        await protocol.handle_disconnect()
+
+        mock_transport.connect.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_handle_disconnect_noop_when_not_running(self, mock_transport: MagicMock) -> None:
+        """A disconnect during/after shutdown must not trigger reconnection."""
+        protocol = Protocol(mock_transport)
+        protocol._running = False
+
+        await protocol.handle_disconnect()
+
+        mock_transport.connect.assert_not_called()
+        assert protocol._reconnecting is False

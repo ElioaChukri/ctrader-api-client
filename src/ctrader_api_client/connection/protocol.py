@@ -83,6 +83,10 @@ class Protocol:
         self._reconnect_min_wait = reconnect_min_wait
         self._reconnect_max_wait = reconnect_max_wait
 
+        # Guards against multiple concurrent reconnection attempts (e.g. the
+        # reader loop and the heartbeat loop both detecting the same drop).
+        self._reconnecting = False
+
         # Reconnection callback (set by CTraderClient)
         self._on_reconnect: Callable[[], Awaitable[None]] | None = None
 
@@ -314,29 +318,74 @@ class Protocol:
             logger.warning("Event handler error: %s", e)
 
     async def handle_disconnect(self) -> None:
-        """Handle unexpected disconnection and attempt reconnection."""
+        """Trigger reconnection after an unexpected disconnect.
+
+        Safe to call from any task — the reader loop, the heartbeat loop, or a
+        failed heartbeat write. The reconnection itself runs as a *separate*
+        task on the protocol task group (see :meth:`_reconnect_task`) rather
+        than inline.
+
+        This indirection is essential: the caller is usually the reader loop,
+        which invokes this method from inside its own ``anyio.CancelScope``.
+        Doing the reconnection inline used to cancel that scope (to stop the
+        reader) and thereby abort the in-flight reconnection at its very first
+        checkpoint, leaving the client permanently offline. Spawning a
+        standalone task decouples the reconnection from the cancel scope of
+        whichever loop detected the drop.
+
+        Idempotent: calls made while a reconnection is already in flight are
+        ignored, so the reader and heartbeat loops racing to report the same
+        drop only produce a single reconnection.
+        """
+        if not self._running or self._reconnecting:
+            return
+        if self._task_group is None:
+            return
+
+        self._reconnecting = True
         logger.warning("Connection lost, attempting to reconnect...")
+        self._task_group.start_soon(self._reconnect_task)
 
-        # Cancel the reader loop first to prevent race conditions
-        if self._reader_scope is not None:
-            self._reader_scope.cancel()
-            self._reader_scope = None
+    async def _reconnect_task(self) -> None:
+        """Own the full reconnection lifecycle from a standalone task.
 
-        # Close the transport
-        await self._transport.close()
-
-        # Attempt reconnection
+        Runs outside the reader/heartbeat cancel scopes so it survives the death
+        of whichever task detected the drop. It must never let an exception
+        escape: an unhandled error here would propagate into the protocol task
+        group and tear down every other task. A terminal reconnection failure is
+        instead recorded by stopping the protocol and waking pending requests.
+        """
         try:
+            # The reader loop is reading a dead stream; cancel it before we
+            # reconnect so a stale reader can't race the fresh one we restart.
+            if self._reader_scope is not None:
+                self._reader_scope.cancel()
+                self._reader_scope = None
+
+            # Close the old transport (idempotent — the task that detected the
+            # drop may have already raced us to it).
+            await self._transport.close()
+
             await self._reconnect()
             logger.info("Reconnection successful")
         except (CTraderConnectionFailedError, CTraderConnectionClosedError) as e:
-            logger.error("Reconnection failed: %s", e)
+            logger.error("Reconnection failed, giving up: %s", e)
             self._running = False
-            # Signal all pending requests to wake up with error
+            # Wake all pending requests so callers fail fast instead of hanging.
             for msg_id in list(self._pending.keys()):
-                self._errors[msg_id] = CTraderConnectionClosedError("Connection lost and reconnection failed")
+                self._errors[msg_id] = CTraderConnectionClosedError(
+                    "Connection lost and reconnection failed"
+                )
                 self._pending[msg_id].set()
-            raise
+        except Exception:
+            # Defensive: never let the reconnection task crash the task group.
+            logger.exception("Unexpected error while reconnecting")
+            self._running = False
+            for msg_id in list(self._pending.keys()):
+                self._errors[msg_id] = CTraderConnectionClosedError("Reconnection error")
+                self._pending[msg_id].set()
+        finally:
+            self._reconnecting = False
 
     async def _reconnect(self) -> None:
         """Attempt reconnection with exponential backoff.
@@ -369,6 +418,12 @@ class Protocol:
         if self._task_group is not None:
             self._task_group.start_soon(self._reader_loop)
 
-        # Notify callback for re-authentication
+        # Notify callback for re-authentication. The transport is already back
+        # up at this point, so a failure in the callback must not fail the
+        # reconnection itself — log it and let the caller's ReconnectedEvent
+        # surface the details.
         if self._on_reconnect is not None:
-            await self._on_reconnect()
+            try:
+                await self._on_reconnect()
+            except Exception:
+                logger.exception("Post-reconnect re-authentication callback failed")
