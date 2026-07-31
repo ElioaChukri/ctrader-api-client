@@ -168,7 +168,8 @@ class CTraderClient:
         self._connected = False
 
         # Set up reconnection handler
-        self._protocol._on_reconnect = self._handle_reconnect
+        self._protocol.set_reconnect_handler(self._handle_reconnect)
+        self._protocol.set_disconnect_handler(self._handle_disconnect)
 
         # Recover accounts dropped by a server-side disconnect
         self._emitter.subscribe(AccountDisconnectEvent, self._handle_account_disconnect)
@@ -377,6 +378,16 @@ class CTraderClient:
                 failed_accounts=tuple(failed),
             )
         )
+
+    async def _handle_disconnect(self) -> None:
+        """Discard the state that died with the connection.
+
+        Account sessions live on the server side of the link, so a dropped link
+        means they are gone. Forgetting them here keeps `is_account_authorized`
+        honest while the client is offline; the credentials are kept so the
+        reconnect handler can re-establish the sessions.
+        """
+        self._auth.handle_connection_lost()
 
     async def __aenter__(self) -> CTraderClient:
         """Async context manager entry.

@@ -38,6 +38,13 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=betterproto.Message)
 EventHandler = Callable[[T], Awaitable[None]]
 
+# Guards for the reader loop's per-message error path. A failure that repeats on
+# every iteration (rather than affecting a single message) must not be allowed to
+# spin: the backoff yields control so cancellation can be delivered, and the cap
+# escalates a stuck reader to a reconnection instead of an endless log flood.
+_READ_ERROR_BACKOFF = 0.05
+_MAX_CONSECUTIVE_READ_ERRORS = 10
+
 
 class Protocol:
     """Message-level protocol handling with correlation and dispatch.
@@ -87,8 +94,25 @@ class Protocol:
         # reader loop and the heartbeat loop both detecting the same drop).
         self._reconnecting = False
 
-        # Reconnection callback (set by CTraderClient)
+        # Lifecycle callbacks (see set_reconnect_handler/set_disconnect_handler)
         self._on_reconnect: Callable[[], Awaitable[None]] | None = None
+        self._on_disconnect: Callable[[], Awaitable[None]] | None = None
+
+    def set_reconnect_handler(self, handler: Callable[[], Awaitable[None]]) -> None:
+        """Register the callback run once the transport is back up.
+
+        Called after a successful reconnection, before any queued work resumes,
+        so the owner can re-establish server-side state such as authentication.
+        """
+        self._on_reconnect = handler
+
+    def set_disconnect_handler(self, handler: Callable[[], Awaitable[None]]) -> None:
+        """Register the callback run as soon as a dropped link is detected.
+
+        Called before reconnection is attempted, so the owner can discard state
+        that only holds while the link is up.
+        """
+        self._on_disconnect = handler
 
     @property
     def is_connected(self) -> bool:
@@ -265,28 +289,61 @@ class Protocol:
         """Continuously read and dispatch messages until stopped."""
         with anyio.CancelScope() as scope:
             self._reader_scope = scope
+            consecutive_errors = 0
             while self._running:
                 try:
                     raw = await read_framed_message(self._transport.stream)
                     proto_msg = deserialize_proto_message(raw)
                     inner = unwrap_message(proto_msg)
                     await self._dispatch_message(proto_msg, inner)
+                    consecutive_errors = 0
                 except FramingError as e:
                     logger.error("Protocol framing error (possible data corruption): %s", e)
                     if self._running:
                         await self.handle_disconnect()
                     break
-                except (anyio.ClosedResourceError, anyio.EndOfStream):
+                except (
+                    anyio.ClosedResourceError,
+                    anyio.EndOfStream,
+                    anyio.BrokenResourceError,
+                ):
+                    # The socket/TLS session is gone. BrokenResourceError leaves
+                    # the stream object in place, so retrying would re-raise
+                    # immediately — never loop on these.
                     if self._running:
                         logger.debug("Connection closed by remote")
                         await self.handle_disconnect()
                     break
-                except anyio.get_cancelled_exc_class():
+                except CTraderConnectionClosedError:
+                    # The transport was closed underneath us: this is a stale
+                    # reader still alive while _reconnect_task rebuilds the
+                    # connection. That task restarts the reader, so just exit.
+                    logger.debug("Reader stopping: transport is no longer connected")
                     break
+                except anyio.get_cancelled_exc_class():
+                    raise
                 except Exception as e:
-                    # Log but continue - don't crash reader on single message errors
-                    logger.warning("Error processing message: %s", e)
-                    continue
+                    # Genuine per-message errors are recoverable, so keep
+                    # reading — but yield first. Without a checkpoint here, an
+                    # error that repeats every iteration turns this into a hot
+                    # loop that floods the log and starves cancellation.
+                    consecutive_errors += 1
+                    logger.warning(
+                        "Error processing message (%d consecutive): %s: %s",
+                        consecutive_errors,
+                        type(e).__name__,
+                        e,
+                        exc_info=consecutive_errors == 1,
+                    )
+                    if consecutive_errors >= _MAX_CONSECUTIVE_READ_ERRORS:
+                        logger.error(
+                            "Reader failed %d times consecutively, treating as disconnect",
+                            consecutive_errors,
+                        )
+                        if self._running:
+                            await self.handle_disconnect()
+                        break
+                    await anyio.sleep(_READ_ERROR_BACKOFF)
 
     async def _dispatch_message(
         self,
@@ -376,6 +433,16 @@ class Protocol:
 
         self._reconnecting = True
         logger.warning("Connection lost, attempting to reconnect...")
+
+        # State tied to the dead link is invalid from this moment on. Report it
+        # before reconnecting so nothing observes a session that no longer
+        # exists, and never let a failing listener block the reconnection.
+        if self._on_disconnect is not None:
+            try:
+                await self._on_disconnect()
+            except Exception:
+                logger.exception("Disconnect handler failed")
+
         self._task_group.start_soon(self._reconnect_task)
 
     async def _reconnect_task(self) -> None:
@@ -405,9 +472,7 @@ class Protocol:
             self._running = False
             # Wake all pending requests so callers fail fast instead of hanging.
             for msg_id in list(self._pending.keys()):
-                self._errors[msg_id] = CTraderConnectionClosedError(
-                    "Connection lost and reconnection failed"
-                )
+                self._errors[msg_id] = CTraderConnectionClosedError("Connection lost and reconnection failed")
                 self._pending[msg_id].set()
         except Exception:
             # Defensive: never let the reconnection task crash the task group.
