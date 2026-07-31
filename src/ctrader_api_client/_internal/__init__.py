@@ -1,8 +1,8 @@
 from .messages import (
     ClientMessageIdGenerator,
-    MessageRegistry,
     deserialize_proto_message,
-    get_registry,
+    get_class,
+    get_payload_type,
     unwrap_message,
     wrap_message,
 )
@@ -15,10 +15,10 @@ from .serialization import (
 
 __all__ = [
     "ClientMessageIdGenerator",
-    "MessageRegistry",
     "deserialize_proto_message",
     "encode_with_length_prefix",
-    "get_registry",
+    "get_class",
+    "get_payload_type",
     "read_exact",
     "read_framed_message",
     "unwrap_message",
