@@ -25,9 +25,11 @@ from .events import (
     SpotEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
+    TokenRefreshFailedEvent,
     TraderUpdateEvent,
     TrailingStopChangedEvent,
 )
+from .exceptions import TokenRefreshError
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ T_AccountIdOnly = TypeVar(
     SymbolChangedEvent,
     TrailingStopChangedEvent,
     MarginCallTriggerEvent,
+    TokenRefreshFailedEvent,
 )
 
 # Events that support no filters
@@ -152,6 +155,7 @@ class CTraderClient:
             reauth_policy=config.reauth_policy,
             clock=clock,
             on_account_ready=self._emit_ready_event,
+            on_refresh_failed=self._emit_refresh_failed_event,
         )
 
         # API namespaces
@@ -329,6 +333,19 @@ class CTraderClient:
 
         is_reconnect = trigger in (AuthTrigger.RECONNECT, AuthTrigger.ACCOUNT_REAUTH)
         await self._emitter.emit(ReadyEvent(account_id=account_id, is_reconnect=is_reconnect))
+
+    async def _emit_refresh_failed_event(self, account_id: int, error: TokenRefreshError) -> None:
+        """Emit TokenRefreshFailedEvent when a token refresh exhausts its retries.
+
+        Called by AuthManager, which keeps the existing credentials and retries
+        on the next check interval. A repeating event means the refresh token is
+        no longer usable and the account must be re-authorized out of band.
+
+        Args:
+            account_id: The account whose token could not be refreshed.
+            error: The refresh failure, including its underlying cause.
+        """
+        await self._emitter.emit(TokenRefreshFailedEvent(account_id=account_id, error=error))
 
     async def _handle_account_disconnect(self, event: AccountDisconnectEvent) -> None:
         """Route a server-side account disconnect into recovery re-auth."""

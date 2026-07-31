@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 TokenRefreshCallback = Callable[[AccountCredentials], Awaitable[None]]
 AccountReadyCallback = Callable[[int, AuthTrigger], Awaitable[None]]  # (account_id, trigger)
+RefreshFailedCallback = Callable[[int, TokenRefreshError], Awaitable[None]]  # (account_id, error)
 
 # Codes the server uses when the token itself is the problem, rather than the
 # application, the account or the request.
@@ -99,6 +100,7 @@ class AuthManager:
         clock: Clock | None = None,
         on_tokens_refreshed: TokenRefreshCallback | None = None,
         on_account_ready: AccountReadyCallback | None = None,
+        on_refresh_failed: RefreshFailedCallback | None = None,
     ) -> None:
         """Initialize the authentication manager.
 
@@ -113,6 +115,10 @@ class AuthManager:
                 Receives the new AccountCredentials. Use this to persist tokens.
             on_account_ready: Async callback invoked when an account is authenticated.
                 Receives (account_id, trigger). Use this to perform any initial client setup.
+            on_refresh_failed: Async callback invoked when a token refresh fails after
+                all retries. Receives (account_id, error). The old credentials are kept
+                and the next check interval retries, so this reports a condition rather
+                than a final outcome.
         """
         self._protocol = protocol
         self._client_id = client_id
@@ -122,6 +128,7 @@ class AuthManager:
         self._clock = clock if clock is not None else MonotonicClock()
         self._on_tokens_refreshed = on_tokens_refreshed
         self._on_account_ready = on_account_ready
+        self._on_refresh_failed = on_refresh_failed
 
         # Every account the manager knows about, keyed by cTID trader account
         # ID, each carrying its own session state.
@@ -574,7 +581,12 @@ class AuthManager:
                     self._defer_recovery(account_id)
 
     async def _refresh_loop(self) -> None:
-        """Periodically check and refresh expiring tokens."""
+        """Periodically check and refresh expiring tokens.
+
+        A refresh that exhausts its retries keeps the existing credentials and
+        reports the failure; the loop stays alive so the next check interval can
+        recover from a transient outage.
+        """
         with anyio.CancelScope() as scope:
             self._task_scope = scope
             while self._running:
@@ -592,8 +604,27 @@ class AuthManager:
                         try:
                             await self._refresh_account(account_id)
                         except TokenRefreshError as e:
-                            logger.error("Failed to refresh token for account %d: %s", account_id, e)
-                            raise
+                            logger.error(
+                                "Failed to refresh token for account %d, will retry in %.0fs: %s",
+                                account_id,
+                                self._refresh.check_interval,
+                                e,
+                            )
+                            await self._report_refresh_failure(account_id, e)
+
+    async def _report_refresh_failure(self, account_id: int, error: TokenRefreshError) -> None:
+        """Notify the refresh failure callback without disturbing the loop."""
+        if self._on_refresh_failed is None:
+            return
+
+        try:
+            await self._on_refresh_failed(account_id, error)
+        except Exception as e:
+            logger.warning(
+                "Token refresh failure callback failed for account %d: %s",
+                account_id,
+                e,
+            )
 
     async def _refresh_account(self, account_id: int) -> None:
         """Refresh tokens for an account with retry logic.

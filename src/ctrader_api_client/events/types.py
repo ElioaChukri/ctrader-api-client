@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from ..enums import ExecutionType, OrderSide
+from ..exceptions import TokenRefreshError
 from ..models import Trendbar
 
 
@@ -181,6 +182,25 @@ class TokenInvalidatedEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class TokenRefreshFailedEvent:
+    """Token refresh failed event.
+
+    Emitted when an access token could not be refreshed after all retries.
+    The old credentials are kept and the client retries on the next refresh
+    check, so a transient failure recovers on its own. A persistent failure
+    means the refresh token is no longer usable and the account must be
+    re-authorized out of band.
+
+    Attributes:
+        account_id: The cTID trader account ID.
+        error: The refresh failure, including its underlying cause.
+    """
+
+    account_id: int
+    error: TokenRefreshError
+
+
+@dataclass(frozen=True, slots=True)
 class ClientDisconnectEvent:
     """Client disconnect event.
 
@@ -317,6 +337,7 @@ type Event = (
     | MarginChangeEvent
     | DepthEvent
     | TokenInvalidatedEvent
+    | TokenRefreshFailedEvent
     | ClientDisconnectEvent
     | AccountDisconnectEvent
     | SymbolChangedEvent
