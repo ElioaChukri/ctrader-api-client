@@ -183,6 +183,38 @@ class Protocol:
             self._results.pop(msg_id, None)
             self._errors.pop(msg_id, None)
 
+    async def request[R: betterproto.Message](
+        self,
+        message: betterproto.Message,
+        response_type: type[R],
+        timeout: float = 30.0,
+    ) -> R:
+        """Send a request and return its response, narrowed to the expected type.
+
+        Args:
+            message: The protobuf message to send.
+            response_type: The response the server is expected to reply with.
+            timeout: Timeout in seconds for waiting for a response.
+
+        Returns:
+            The response message, typed as `response_type`.
+
+        Raises:
+            APIError: If the server returns ProtoOAErrorRes, or replies with a
+                message of any other type.
+            CTraderConnectionClosedError: If not connected and reconnection fails.
+            CTraderConnectionTimeoutError: If response not received within timeout.
+        """
+        response = await self.send_request(message, timeout=timeout)
+
+        if not isinstance(response, response_type):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected {response_type.__name__}, got {type(response).__name__}",
+            )
+
+        return response
+
     async def send_event(self, message: betterproto.Message) -> None:
         """Send message without expecting response (e.g., heartbeat).
 

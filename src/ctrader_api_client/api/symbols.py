@@ -8,7 +8,6 @@ from .._internal.proto import (
     ProtoOASymbolsListReq,
     ProtoOASymbolsListRes,
 )
-from ..exceptions import APIError
 from ..models import Symbol, SymbolInfo
 
 
@@ -67,16 +66,11 @@ class SymbolsAPI:
         """
         request = ProtoOASymbolsListReq(ctid_trader_account_id=account_id)
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
+            ProtoOASymbolsListRes,
             timeout=timeout or self._default_timeout,
         )
-
-        if not isinstance(response, ProtoOASymbolsListRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASymbolsListRes, got {type(response).__name__}",
-            )
 
         return [SymbolInfo.from_proto(s) for s in response.symbol]
 
@@ -105,16 +99,11 @@ class SymbolsAPI:
             symbol_id=symbol_ids,
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
+            ProtoOASymbolByIdRes,
             timeout=timeout or self._default_timeout,
         )
-
-        if not isinstance(response, ProtoOASymbolByIdRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASymbolByIdRes, got {type(response).__name__}",
-            )
 
         return [Symbol.from_proto(s) for s in response.symbol]
 

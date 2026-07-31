@@ -6,7 +6,6 @@ from .._internal.proto import (
     ProtoOATraderReq,
     ProtoOATraderRes,
 )
-from ..exceptions import APIError
 from ..models import Account
 
 
@@ -57,15 +56,10 @@ class AccountsAPI:
         """
         request = ProtoOATraderReq(ctid_trader_account_id=account_id)
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
+            ProtoOATraderRes,
             timeout=timeout or self._default_timeout,
         )
-
-        if not isinstance(response, ProtoOATraderRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOATraderRes, got {type(response).__name__}",
-            )
 
         return Account.from_proto(response.trader)
