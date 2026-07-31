@@ -32,9 +32,35 @@ dev = [
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
     "pytest>=9.0.3",
+    "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.15.9",
     "zuban>=0.7.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+# Every coroutine test runs under anyio without a per-test marker. Marking them
+# later (in a collection hook) makes anyio rebuild the item and silently drop
+# any pytest.mark.parametrize arguments.
+anyio_mode = "auto"
+# No test should ever hang: a stuck reader loop or an unresolved request must
+# fail the run rather than block it.
+timeout = 30
+filterwarnings = [
+    "error",
+    # stringcase, a transitive betterproto dependency, is unmaintained and has
+    # invalid escape sequences that newer Pythons flag on import.
+    "ignore::SyntaxWarning",
+]
+
+[tool.coverage.run]
+source = ["ctrader_api_client"]
+omit = ["*/_internal/proto/*"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "@overload", "\\.\\.\\."]
 
 [tool.ruff]
 line-length = 120
