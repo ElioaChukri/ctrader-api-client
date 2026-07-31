@@ -148,6 +148,9 @@ class CTraderClient:
             protocol=self._protocol,
             client_id=config.client_id,
             client_secret=config.client_secret,
+            refresh_policy=config.refresh_policy,
+            reauth_policy=config.reauth_policy,
+            clock=clock,
             on_account_ready=self._emit_ready_event,
         )
 
@@ -365,7 +368,8 @@ class CTraderClient:
             return
 
         # Re-authenticate all previously authenticated accounts
-        for account_id, credentials in list(self._auth._accounts.items()):
+        for credentials in self._auth.all_credentials():
+            account_id = credentials.account_id
             try:
                 await self._auth.authenticate_account(credentials, trigger=AuthTrigger.RECONNECT)
                 restored.append(account_id)

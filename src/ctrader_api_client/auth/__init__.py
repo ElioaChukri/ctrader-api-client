@@ -6,6 +6,7 @@ with automatic token refresh management.
 
 from .credentials import AccountCredentials
 from .manager import AuthManager
+from .policy import ReauthPolicy, RefreshPolicy
 from .trigger import AuthTrigger
 
 
@@ -13,4 +14,6 @@ __all__ = [
     "AccountCredentials",
     "AuthManager",
     "AuthTrigger",
+    "ReauthPolicy",
+    "RefreshPolicy",
 ]

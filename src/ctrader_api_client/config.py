@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .auth import ReauthPolicy, RefreshPolicy
+
 
 class ClientConfig(BaseModel):
     """Configuration for CTraderClient.
@@ -18,6 +20,8 @@ class ClientConfig(BaseModel):
         reconnect_attempts: Max reconnection attempts (0 to disable).
         reconnect_min_wait: Initial wait between reconnection attempts.
         reconnect_max_wait: Maximum wait between reconnection attempts.
+        refresh_policy: When to refresh access tokens and how hard to try.
+        reauth_policy: Backoff for re-establishing sessions the server dropped.
 
     Example:
         ```python
@@ -52,5 +56,9 @@ class ClientConfig(BaseModel):
     reconnect_attempts: int = Field(default=5, ge=0)
     reconnect_min_wait: float = Field(default=1.0, gt=0)
     reconnect_max_wait: float = Field(default=60.0, gt=0)
+
+    # Authentication settings
+    refresh_policy: RefreshPolicy = RefreshPolicy()
+    reauth_policy: ReauthPolicy = ReauthPolicy()
 
     model_config = ConfigDict(frozen=True)
