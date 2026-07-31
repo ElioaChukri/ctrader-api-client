@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from .._internal.proto import (
     ProtoOASymbolByIdReq,
     ProtoOASymbolByIdRes,
@@ -9,13 +7,10 @@ from .._internal.proto import (
     ProtoOASymbolsListRes,
 )
 from ..models import Symbol, SymbolInfo
+from ._base import BaseAPI
 
 
-if TYPE_CHECKING:
-    from ..connection import Protocol
-
-
-class SymbolsAPI:
+class SymbolsAPI(BaseAPI):
     """Symbol information and search operations.
 
     Provides methods to list, retrieve, and search trading symbols.
@@ -32,16 +27,6 @@ class SymbolsAPI:
         eurusd = await client.symbols.get_by_id(account_id, 270)
         ```
     """
-
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the symbols API.
-
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
-        """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
 
     async def list_all(
         self,
@@ -69,7 +54,7 @@ class SymbolsAPI:
         response = await self._protocol.request(
             request,
             ProtoOASymbolsListRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return [SymbolInfo.from_proto(s) for s in response.symbol]
@@ -102,7 +87,7 @@ class SymbolsAPI:
         response = await self._protocol.request(
             request,
             ProtoOASymbolByIdRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return [Symbol.from_proto(s) for s in response.symbol]

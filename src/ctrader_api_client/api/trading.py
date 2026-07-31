@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 import betterproto
 
@@ -33,10 +32,7 @@ from ..models.requests import (
     ClosePositionRequest,
     NewOrderRequest,
 )
-
-
-if TYPE_CHECKING:
-    from ..connection import Protocol
+from ._base import BaseAPI
 
 
 logger = logging.getLogger(__name__)
@@ -80,7 +76,7 @@ def _proto_to_execution_event(proto: ProtoOAExecutionEvent) -> ExecutionEvent:
     return event
 
 
-class TradingAPI:
+class TradingAPI(BaseAPI):
     """Trading operations: orders and positions.
 
     Provides methods for order placement, modification, cancellation,
@@ -108,16 +104,6 @@ class TradingAPI:
         ```
     """
 
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the trading API.
-
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
-        """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
-
     async def _execute_trade(
         self,
         request: betterproto.Message,
@@ -130,7 +116,7 @@ class TradingAPI:
         """
         response = await self._protocol.send_request(
             request,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         _raise_if_order_error(response)
@@ -157,7 +143,7 @@ class TradingAPI:
         response = await self._protocol.request(
             request,
             ProtoOAGetPositionUnrealizedPnLRes,
-            timeout=self._default_timeout,
+            timeout=self._timeout(None),
         )
 
         divisor = money_divisor(response.money_digits)
@@ -327,7 +313,7 @@ class TradingAPI:
         response = await self._protocol.request(
             request,
             ProtoOAReconcileRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return [Position.from_proto(p) for p in response.position]
@@ -368,7 +354,7 @@ class TradingAPI:
         response = await self._protocol.request(
             request,
             ProtoOAOrderListRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return [Order.from_proto(o) for o in response.order]
@@ -396,7 +382,7 @@ class TradingAPI:
         response = await self._protocol.request(
             request,
             ProtoOAOrderListRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         orders = [Order.from_proto(o) for o in response.order]
@@ -431,7 +417,7 @@ class TradingAPI:
         response = await self._protocol.request(
             request,
             ProtoOADealListByPositionIdRes,
-            timeout=self._default_timeout,
+            timeout=self._timeout(None),
         )
 
         return [Deal.from_proto(d) for d in response.deal]
@@ -471,7 +457,7 @@ class TradingAPI:
         response = await self._protocol.request(
             request,
             ProtoOADealListRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return [Deal.from_proto(d) for d in response.deal]

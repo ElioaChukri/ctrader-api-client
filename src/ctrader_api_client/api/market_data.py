@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from .._internal.proto import (
     ProtoOAGetTickDataReq,
@@ -27,10 +26,7 @@ from .._internal.proto import (
 )
 from ..enums import TrendbarPeriod
 from ..models import TickData, Trendbar
-
-
-if TYPE_CHECKING:
-    from ..connection import Protocol
+from ._base import BaseAPI
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +51,7 @@ _PERIOD_TO_PROTO: dict[TrendbarPeriod, int] = {
 }
 
 
-class MarketDataAPI:
+class MarketDataAPI(BaseAPI):
     """Market data subscriptions and historical data.
 
     Provides methods to subscribe to real-time market data (spots, trendbars,
@@ -83,16 +79,6 @@ class MarketDataAPI:
         )
         ```
     """
-
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the market data API.
-
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
-        """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
 
     # -------------------------------------------------------------------------
     # Spot Subscriptions
@@ -128,7 +114,7 @@ class MarketDataAPI:
         await self._protocol.request(
             request,
             ProtoOASubscribeSpotsRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
     async def unsubscribe_spots(
@@ -157,7 +143,7 @@ class MarketDataAPI:
         await self._protocol.request(
             request,
             ProtoOAUnsubscribeSpotsRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
     # -------------------------------------------------------------------------
@@ -198,7 +184,7 @@ class MarketDataAPI:
         await self._protocol.request(
             request,
             ProtoOASubscribeLiveTrendbarRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
     async def unsubscribe_trendbars(
@@ -230,7 +216,7 @@ class MarketDataAPI:
         await self._protocol.request(
             request,
             ProtoOAUnsubscribeLiveTrendbarRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
     # -------------------------------------------------------------------------
@@ -266,7 +252,7 @@ class MarketDataAPI:
         await self._protocol.request(
             request,
             ProtoOASubscribeDepthQuotesRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
     async def unsubscribe_depth(
@@ -295,7 +281,7 @@ class MarketDataAPI:
         await self._protocol.request(
             request,
             ProtoOAUnsubscribeDepthQuotesRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
     # -------------------------------------------------------------------------
@@ -343,7 +329,7 @@ class MarketDataAPI:
         response = await self._protocol.request(
             request,
             ProtoOAGetTrendbarsRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return [Trendbar.from_proto(t, historical=True) for t in response.trendbar]
@@ -391,7 +377,7 @@ class MarketDataAPI:
         response = await self._protocol.request(
             request,
             ProtoOAGetTickDataRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return TickData.from_proto_list(response.tick_data)

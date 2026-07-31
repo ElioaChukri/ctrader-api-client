@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from .._internal.proto import (
     ProtoOATraderReq,
     ProtoOATraderRes,
 )
 from ..models import Account
+from ._base import BaseAPI
 
 
-if TYPE_CHECKING:
-    from ..connection import Protocol
-
-
-class AccountsAPI:
+class AccountsAPI(BaseAPI):
     """Account information operations.
 
     Provides methods to retrieve account/trader details.
@@ -25,16 +20,6 @@ class AccountsAPI:
         print(f"Leverage: {account.get_leverage()}")
         ```
     """
-
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the accounts API.
-
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
-        """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
 
     async def get_trader(
         self,
@@ -59,7 +44,7 @@ class AccountsAPI:
         response = await self._protocol.request(
             request,
             ProtoOATraderRes,
-            timeout=timeout or self._default_timeout,
+            timeout=self._timeout(timeout),
         )
 
         return Account.from_proto(response.trader)
