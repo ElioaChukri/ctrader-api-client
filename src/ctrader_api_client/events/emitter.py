@@ -5,6 +5,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+import anyio
+
 from .types import Event
 
 
@@ -28,7 +30,7 @@ class EventEmitter:
     """Pub/sub event emitter with filtering.
 
     Allows subscribing to typed events with optional account_id and symbol_id
-    filters. Handlers are called concurrently when an event is emitted, and exceptions are logged without
+    filters. Handlers for an event run concurrently with each other, and exceptions are logged without
     affecting other handlers.
 
     If ordered execution of handlers is required, implement that logic within a single handler to ensure determinism.
@@ -167,9 +169,11 @@ class EventEmitter:
     async def emit(self, event: Event) -> None:
         """Emit an event to all matching subscribers.
 
-        Handlers are executed concurrently to prevent deadlocks when handlers
-        make API calls or other blocking I/O operations. If you need ordered operations,
-        implement that logic within a single handler.
+        Handlers run concurrently, so a handler that waits on I/O — including
+        one that makes an API call and therefore depends on the reader loop —
+        cannot hold up the others. Emit returns once every handler has
+        finished. If you need ordered operations, implement that logic within a
+        single handler.
 
         If a handler raises, the error is logged and the optional error callback
         is invoked. Other handlers continue unaffected.
@@ -177,32 +181,47 @@ class EventEmitter:
         Args:
             event: The event to emit.
         """
-        event_type = type(event)
-        subscriptions = self._subscriptions.get(event_type, [])
+        # Snapshot the matching subscriptions first: a handler is free to
+        # subscribe or unsubscribe while this emit is still in flight.
+        matching = [sub for sub in self._subscriptions.get(type(event), []) if self._matches_filter(event, sub)]
 
-        for sub in subscriptions:
-            if not self._matches_filter(event, sub):
-                continue
+        if not matching:
+            return
 
-            try:
-                await sub.handler(event)
-            except Exception as e:
-                logger.error(
-                    "Handler %s raised %s for %s: %s",
-                    getattr(sub.handler, "__name__", repr(sub.handler)),
-                    type(e).__name__,
-                    event_type.__name__,
-                    e,
-                )
-                if self._on_handler_error is not None:
-                    try:
-                        await self._on_handler_error(event, sub.handler, e)
-                    except Exception as callback_error:
-                        logger.error(
-                            "Error callback raised %s: %s",
-                            type(callback_error).__name__,
-                            callback_error,
-                        )
+        async with anyio.create_task_group() as task_group:
+            for sub in matching:
+                task_group.start_soon(self._deliver, sub, event)
+
+    async def _deliver(self, sub: Subscription, event: Event) -> None:
+        """Call a single handler, containing whatever it raises.
+
+        An exception must not escape into the task group: that would cancel the
+        sibling handlers, which is the coupling concurrent dispatch exists to
+        avoid in the first place.
+
+        Args:
+            sub: The subscription whose handler to call.
+            event: The event to pass to the handler.
+        """
+        try:
+            await sub.handler(event)
+        except Exception as e:
+            logger.error(
+                "Handler %s raised %s for %s: %s",
+                getattr(sub.handler, "__name__", repr(sub.handler)),
+                type(e).__name__,
+                type(event).__name__,
+                e,
+            )
+            if self._on_handler_error is not None:
+                try:
+                    await self._on_handler_error(event, sub.handler, e)
+                except Exception as callback_error:
+                    logger.error(
+                        "Error callback raised %s: %s",
+                        type(callback_error).__name__,
+                        callback_error,
+                    )
 
     @staticmethod
     def _validate_filter(event_type: type, field_name: str) -> None:
