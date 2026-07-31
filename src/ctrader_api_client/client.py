@@ -110,13 +110,16 @@ class CTraderClient:
         protocol: Low-level protocol access for advanced usage.
     """
 
-    def __init__(self, config: ClientConfig, *, clock: Clock | None = None) -> None:
+    def __init__(self, config: ClientConfig, *, _clock: Clock | None = None) -> None:
         """Initialize the client.
 
         Args:
             config: Client configuration including credentials and settings.
-            clock: Optional time source for the heartbeat and token-refresh
-                timers. Defaults to a monotonic clock backed by real time.
+
+        The leading-underscore ``_clock`` parameter is an internal test seam for
+        injecting a deterministic time source into the heartbeat and token-refresh
+        timers. It defaults to a monotonic clock backed by real time and is not
+        part of the public API.
         """
         self._config = config
 
@@ -136,7 +139,7 @@ class CTraderClient:
             protocol=self._protocol,
             interval=config.heartbeat_interval,
             timeout=config.heartbeat_timeout,
-            clock=clock,
+            clock=_clock,
         )
 
         # Event system
@@ -153,7 +156,7 @@ class CTraderClient:
             client_secret=config.client_secret,
             refresh_policy=config.refresh_policy,
             reauth_policy=config.reauth_policy,
-            clock=clock,
+            clock=_clock,
             on_account_ready=self._emit_ready_event,
             on_refresh_failed=self._emit_refresh_failed_event,
         )

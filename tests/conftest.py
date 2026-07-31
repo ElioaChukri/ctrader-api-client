@@ -81,7 +81,7 @@ async def make_client(
     clients: list[CTraderClient] = []
 
     def factory(**overrides: object) -> CTraderClient:
-        client = CTraderClient(make_config(**overrides), clock=clock)
+        client = CTraderClient(make_config(**overrides), _clock=clock)
         clients.append(client)
         return client
 
