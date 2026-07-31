@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, overload
 
+from ._internal import Clock
 from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
 from .auth import AuthManager, AuthTrigger
 from .config import ClientConfig
@@ -106,11 +107,13 @@ class CTraderClient:
         protocol: Low-level protocol access for advanced usage.
     """
 
-    def __init__(self, config: ClientConfig) -> None:
+    def __init__(self, config: ClientConfig, *, clock: Clock | None = None) -> None:
         """Initialize the client.
 
         Args:
             config: Client configuration including credentials and settings.
+            clock: Optional time source for the heartbeat and token-refresh
+                timers. Defaults to a monotonic clock backed by real time.
         """
         self._config = config
 
@@ -130,6 +133,7 @@ class CTraderClient:
             protocol=self._protocol,
             interval=config.heartbeat_interval,
             timeout=config.heartbeat_timeout,
+            clock=clock,
         )
 
         # Event system

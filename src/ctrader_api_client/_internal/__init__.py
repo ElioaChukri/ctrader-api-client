@@ -1,3 +1,4 @@
+from .clock import Clock, MonotonicClock
 from .conversions import DEFAULT_MONEY_DIGITS, money_divisor, timestamp_to_datetime
 from .messages import (
     ClientMessageIdGenerator,
@@ -17,6 +18,8 @@ from .serialization import (
 __all__ = [
     "DEFAULT_MONEY_DIGITS",
     "ClientMessageIdGenerator",
+    "Clock",
+    "MonotonicClock",
     "deserialize_proto_message",
     "encode_with_length_prefix",
     "get_class",
