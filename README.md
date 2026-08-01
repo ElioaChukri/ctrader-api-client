@@ -100,7 +100,9 @@ creds = await client.auth.authenticate_by_trader_login(
     expires_at=1778617423,
 )
 
-# Tokens are automatically refreshed before expiry
+# Tokens are automatically refreshed before expiry. A refresh that fails is
+# retried on the next check rather than dropping the session, and surfaces as a
+# TokenRefreshFailedEvent so a persistently dead refresh token is observable.
 ```
 
 ### Market Data
@@ -131,10 +133,10 @@ request = NewOrderRequest(
     side=OrderSide.BUY,
     volume=100000,  # 1 lot in cents
 )
-result = await client.trading.create_order(account_id, request)
+result = await client.trading.place_order(account_id, request)
 
 # Get open positions
-positions = await client.trading.get_positions(account_id)
+positions = await client.trading.get_open_positions(account_id)
 
 # Close a position
 close_position = ClosePositionRequest(
@@ -152,6 +154,7 @@ from ctrader_api_client.events import (
     ExecutionEvent,
     ReadyEvent,
     ReconnectedEvent,
+    TokenRefreshFailedEvent,
 )
 
 # Price updates
@@ -174,6 +177,12 @@ async def on_ready(event: ReadyEvent):
 @client.on(ReconnectedEvent)
 async def on_reconnected(event: ReconnectedEvent):
     print(f"Reconnected, restored accounts: {event.restored_accounts}")
+
+# Token refresh failed (retried automatically; a repeating event means the
+# refresh token is no longer usable and the account must be re-authorized)
+@client.on(TokenRefreshFailedEvent, account_id=account_id)
+async def on_refresh_failed(event: TokenRefreshFailedEvent):
+    print(f"Token refresh failed for {event.account_id}: {event.error}")
 ```
 
 ### Symbols
@@ -218,6 +227,9 @@ Use `ReadyEvent` to set up subscriptions that persist across reconnections.
 ## Configuration
 
 ```python
+from ctrader_api_client import ClientConfig
+from ctrader_api_client.auth import ReauthPolicy, RefreshPolicy
+
 config = ClientConfig(
     client_id="your_client_id",
     client_secret="your_client_secret",
@@ -236,5 +248,20 @@ config = ClientConfig(
     reconnect_attempts=5,
     reconnect_min_wait=1.0,
     reconnect_max_wait=60.0,
+
+    # Token refresh: when to refresh access tokens and how hard to retry
+    refresh_policy=RefreshPolicy(
+        buffer_seconds=300.0,  # refresh this long before expiry
+        check_interval=60.0,   # how often to check for expiring tokens
+        retry_attempts=3,
+        retry_min_wait=1.0,
+        retry_max_wait=30.0,
+    ),
+
+    # Session recovery: backoff for re-establishing sessions the server dropped
+    reauth_policy=ReauthPolicy(
+        min_wait=1.0,
+        max_wait=60.0,
+    ),
 )
 ```
