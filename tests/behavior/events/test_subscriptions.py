@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import anyio
 import pytest
 
 from ctrader_api_client.events import (
@@ -309,3 +310,56 @@ async def test_subscriptions_are_counted_per_type(emitter: EventEmitter) -> None
     assert emitter.subscription_count(SpotEvent) == 2
     assert emitter.subscription_count(ReadyEvent) == 1
     assert emitter.subscription_count() == 3
+
+
+async def test_handlers_run_concurrently_rather_than_one_after_another(emitter: EventEmitter) -> None:
+    """A handler that blocks must not hold up its siblings.
+
+    Each handler announces its arrival, then waits for the other's. Concurrent
+    dispatch lets them rendezvous and both finish; sequential dispatch would
+    leave the first blocked forever on a handler that has not started yet, and
+    fail_after would trip. This is what pins the concurrency guarantee: a
+    regression to sequential delivery makes this test hang and fail.
+    """
+    first_arrived = anyio.Event()
+    second_arrived = anyio.Event()
+    finished: list[str] = []
+
+    async def first(_: SpotEvent) -> None:
+        first_arrived.set()
+        await second_arrived.wait()
+        finished.append("first")
+
+    async def second(_: SpotEvent) -> None:
+        second_arrived.set()
+        await first_arrived.wait()
+        finished.append("second")
+
+    emitter.subscribe(SpotEvent, first)
+    emitter.subscribe(SpotEvent, second)
+
+    with anyio.fail_after(5):
+        await emitter.emit(spot())
+
+    assert set(finished) == {"first", "second"}
+
+
+async def test_emit_returns_only_after_every_handler_has_finished(emitter: EventEmitter) -> None:
+    """emit() awaits all handlers; it does not fire-and-forget onto a task group.
+
+    The handler yields control at least once before recording completion, so a
+    dispatch that returned without awaiting its tasks would let emit() return
+    with `completed` still False.
+    """
+    completed = False
+
+    async def handler(_: SpotEvent) -> None:
+        nonlocal completed
+        await anyio.sleep(0)
+        completed = True
+
+    emitter.subscribe(SpotEvent, handler)
+
+    await emitter.emit(spot())
+
+    assert completed is True
