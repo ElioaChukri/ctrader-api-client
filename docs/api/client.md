@@ -27,6 +27,19 @@ The main entry point for interacting with the cTrader API.
     options:
       show_source: false
 
+## Authentication Policies
+
+Token-refresh and session-recovery timing, passed via
+`ClientConfig(refresh_policy=..., reauth_policy=...)`.
+
+::: ctrader_api_client.auth.RefreshPolicy
+    options:
+      show_source: false
+
+::: ctrader_api_client.auth.ReauthPolicy
+    options:
+      show_source: false
+
 ## Authentication
 
 The `client.auth` property provides access to authentication operations.

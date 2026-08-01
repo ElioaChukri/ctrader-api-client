@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from .._internal.proto import (
     ProtoOASymbolByIdReq,
     ProtoOASymbolByIdRes,
     ProtoOASymbolsListReq,
     ProtoOASymbolsListRes,
 )
-from ..exceptions import APIError
 from ..models import Symbol, SymbolInfo
+from ._base import BaseAPI
 
 
-if TYPE_CHECKING:
-    from ..connection import Protocol
-
-
-class SymbolsAPI:
+class SymbolsAPI(BaseAPI):
     """Symbol information and search operations.
 
     Provides methods to list, retrieve, and search trading symbols.
@@ -33,16 +27,6 @@ class SymbolsAPI:
         eurusd = await client.symbols.get_by_id(account_id, 270)
         ```
     """
-
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the symbols API.
-
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
-        """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
 
     async def list_all(
         self,
@@ -67,16 +51,11 @@ class SymbolsAPI:
         """
         request = ProtoOASymbolsListReq(ctid_trader_account_id=account_id)
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOASymbolsListRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOASymbolsListRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASymbolsListRes, got {type(response).__name__}",
-            )
 
         return [SymbolInfo.from_proto(s) for s in response.symbol]
 
@@ -105,16 +84,11 @@ class SymbolsAPI:
             symbol_id=symbol_ids,
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOASymbolByIdRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOASymbolByIdRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASymbolByIdRes, got {type(response).__name__}",
-            )
 
         return [Symbol.from_proto(s) for s in response.symbol]
 

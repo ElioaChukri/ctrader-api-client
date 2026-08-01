@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
 
 import betterproto
 
@@ -205,25 +204,21 @@ _PAYLOAD_TYPE_TO_CLASS: dict[int, type[betterproto.Message]] = {
 }
 
 
-@dataclass
-class MessageRegistry:
-    """Bidirectional mapping between payload_type and message class."""
+# The reverse direction, for wrapping outbound messages. Every class above maps
+# from exactly one payload type, so inverting the mapping loses nothing.
+_CLASS_TO_PAYLOAD_TYPE: dict[type[betterproto.Message], int] = {
+    cls: payload_type for payload_type, cls in _PAYLOAD_TYPE_TO_CLASS.items()
+}
 
-    payload_type_to_class: dict[int, type[betterproto.Message]] = field(default_factory=dict)
-    class_to_payload_type: dict[type[betterproto.Message], int] = field(default_factory=dict)
 
-    def get_class(self, payload_type: int) -> type[betterproto.Message] | None:
-        """Get the message class for a payload type."""
-        return self.payload_type_to_class.get(payload_type)
+def get_class(payload_type: int) -> type[betterproto.Message] | None:
+    """Get the message class for a payload type, or None if unregistered."""
+    return _PAYLOAD_TYPE_TO_CLASS.get(payload_type)
 
-    def get_payload_type(self, cls: type[betterproto.Message]) -> int | None:
-        """Get the payload type for a message class."""
-        return self.class_to_payload_type.get(cls)
 
-    def register(self, payload_type: int, cls: type[betterproto.Message]) -> None:
-        """Register a bidirectional mapping."""
-        self.payload_type_to_class[payload_type] = cls
-        self.class_to_payload_type[cls] = payload_type
+def get_payload_type(cls: type[betterproto.Message]) -> int | None:
+    """Get the payload type for a message class, or None if unregistered."""
+    return _CLASS_TO_PAYLOAD_TYPE.get(cls)
 
 
 class ClientMessageIdGenerator:
@@ -240,29 +235,6 @@ class ClientMessageIdGenerator:
             return str(self._counter)
 
 
-# Module-level singleton
-_registry: MessageRegistry | None = None
-_registry_lock = threading.Lock()
-
-
-def _build_registry() -> MessageRegistry:
-    """Build the message registry from the explicit mapping."""
-    registry = MessageRegistry()
-    for payload_type, cls in _PAYLOAD_TYPE_TO_CLASS.items():
-        registry.register(payload_type, cls)
-    return registry
-
-
-def get_registry() -> MessageRegistry:
-    """Get the lazily-initialized singleton registry."""
-    global _registry
-    if _registry is None:
-        with _registry_lock:
-            if _registry is None:
-                _registry = _build_registry()
-    return _registry
-
-
 def wrap_message(inner: betterproto.Message, client_msg_id: str | None = None) -> ProtoMessage:
     """Wrap an inner message into a ProtoMessage for transmission.
 
@@ -276,8 +248,7 @@ def wrap_message(inner: betterproto.Message, client_msg_id: str | None = None) -
     Raises:
         UnknownPayloadTypeError: If the inner message type is not registered.
     """
-    registry = get_registry()
-    payload_type = registry.get_payload_type(type(inner))
+    payload_type = get_payload_type(type(inner))
 
     if payload_type is None:
         raise UnknownPayloadTypeError(payload_type=-1)
@@ -302,8 +273,7 @@ def unwrap_message(proto_message: ProtoMessage) -> betterproto.Message:
         UnknownPayloadTypeError: If the payload type is not registered.
         DeserializationError: If deserialization fails.
     """
-    registry = get_registry()
-    cls = registry.get_class(proto_message.payload_type)
+    cls = get_class(proto_message.payload_type)
 
     if cls is None:
         raise UnknownPayloadTypeError(proto_message.payload_type)

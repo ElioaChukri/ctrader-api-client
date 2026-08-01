@@ -5,13 +5,15 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import betterproto
+
+from .._internal import DEFAULT_MONEY_DIGITS, timestamp_to_datetime
 from .._internal.proto import (
     ProtoOAAccountDisconnectEvent,
     ProtoOAAccountsTokenInvalidatedEvent,
     ProtoOAClientDisconnectEvent,
     ProtoOADepthEvent,
     ProtoOAExecutionEvent,
-    ProtoOAExecutionType,
     ProtoOAMarginCallTriggerEvent,
     ProtoOAMarginChangedEvent,
     ProtoOAOrderErrorEvent,
@@ -20,15 +22,14 @@ from .._internal.proto import (
     ProtoOATraderUpdatedEvent,
     ProtoOATrailingSLChangedEvent,
 )
-from ..enums import ExecutionType, OrderSide
 from ..models import Trendbar
+from ._execution import execution_event_from_proto
 from .emitter import EventEmitter
 from .types import (
     AccountDisconnectEvent,
     ClientDisconnectEvent,
     DepthEvent,
     DepthQuote,
-    ExecutionEvent,
     MarginCallTriggerEvent,
     MarginChangeEvent,
     OrderErrorEvent,
@@ -45,22 +46,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-# Map ProtoOAExecutionType enum values to our ExecutionType
-_EXECUTION_TYPE_MAP: dict[int, ExecutionType] = {
-    ProtoOAExecutionType.ORDER_ACCEPTED: ExecutionType.ORDER_ACCEPTED,
-    ProtoOAExecutionType.ORDER_FILLED: ExecutionType.ORDER_FILLED,
-    ProtoOAExecutionType.ORDER_REPLACED: ExecutionType.ORDER_REPLACED,
-    ProtoOAExecutionType.ORDER_CANCELLED: ExecutionType.ORDER_CANCELLED,
-    ProtoOAExecutionType.ORDER_EXPIRED: ExecutionType.ORDER_EXPIRED,
-    ProtoOAExecutionType.ORDER_REJECTED: ExecutionType.ORDER_REJECTED,
-    ProtoOAExecutionType.ORDER_CANCEL_REJECTED: ExecutionType.ORDER_CANCEL_REJECTED,
-    ProtoOAExecutionType.SWAP: ExecutionType.SWAP,
-    ProtoOAExecutionType.DEPOSIT_WITHDRAW: ExecutionType.DEPOSIT_WITHDRAW,
-    ProtoOAExecutionType.ORDER_PARTIAL_FILL: ExecutionType.ORDER_PARTIAL_FILL,
-    ProtoOAExecutionType.BONUS_DEPOSIT_WITHDRAW: ExecutionType.BONUS_DEPOSIT_WITHDRAW,
-}
 
 
 class EventRouter:
@@ -191,61 +176,25 @@ class EventRouter:
             symbol_id=proto.symbol_id,
             bid=proto.bid / Decimal(100000) if proto.bid else None,
             ask=proto.ask / Decimal(100000) if proto.ask else None,
-            timestamp=self._timestamp_to_datetime(proto.timestamp) if proto.timestamp else datetime.now(UTC),
+            timestamp=timestamp_to_datetime(proto.timestamp) if proto.timestamp else datetime.now(UTC),
             trendbar=trendbars,
         )
         await self._emitter.emit(event)
 
     async def _handle_execution(self, proto: ProtoOAExecutionEvent) -> None:
         """Convert ProtoOAExecutionEvent to ExecutionEvent."""
-        # Map execution type
-        exec_type = _EXECUTION_TYPE_MAP.get(proto.execution_type)
+        event = execution_event_from_proto(proto)
 
-        if exec_type is None:
+        if event is None:
             logger.warning("Unknown execution type %s in ProtoOAExecutionEvent", proto.execution_type)
             return
 
-        # Map order side
-        side = OrderSide.BUY
-        if proto.order and proto.order.trade_data:
-            # ProtoOATradeSide: BUY=1, SELL=2
-            if proto.order.trade_data.trade_side == 2:
-                side = OrderSide.SELL
-
-        # Extract order details
-        order_id = proto.order.order_id if proto.order else 0
-        position_id = proto.position.position_id if proto.position else None
-        symbol_id = proto.order.trade_data.symbol_id if proto.order and proto.order.trade_data else 0
-
-        # Extract deal details
-        filled_volume = None
-        fill_price = None
-        timestamp = datetime.now(UTC)
-
-        if proto.deal:
-            filled_volume = proto.deal.filled_volume if proto.deal.filled_volume else None
-            if proto.deal.execution_price:
-                fill_price = Decimal(str(proto.deal.execution_price))
-            if proto.deal.execution_timestamp:
-                timestamp = self._timestamp_to_datetime(proto.deal.execution_timestamp)
-
-        event = ExecutionEvent(
-            account_id=proto.ctid_trader_account_id,
-            execution_type=exec_type,
-            order_id=order_id,
-            position_id=position_id,
-            symbol_id=symbol_id,
-            side=side,
-            filled_volume=filled_volume,
-            fill_price=fill_price,
-            timestamp=timestamp,
-            is_server_event=proto.is_server_event if proto.is_server_event else False,
-            error_code=proto.error_code if proto.error_code else None,
+        logger.debug(
+            "Execution: %s account=%d order=%d",
+            event.execution_type.name,
+            event.account_id,
+            event.order_id,
         )
-        if proto.execution_type in (ProtoOAExecutionType.ORDER_FILLED, ProtoOAExecutionType.ORDER_REJECTED):
-            logger.debug("Execution: %s account=%d order=%d", exec_type.name, event.account_id, event.order_id)
-        else:
-            logger.debug("Execution: %s account=%d order=%d", exec_type.name, event.account_id, event.order_id)
         await self._emitter.emit(event)
 
     async def _handle_order_error(self, proto: ProtoOAOrderErrorEvent) -> None:
@@ -269,14 +218,15 @@ class EventRouter:
     async def _handle_trader_update(self, proto: ProtoOATraderUpdatedEvent) -> None:
         """Convert ProtoOATraderUpdatedEvent to TraderUpdateEvent."""
         trader = proto.trader
-        if not trader:
+        if not betterproto.serialized_on_wire(trader):
+            logger.warning("Ignoring ProtoOATraderUpdatedEvent without trader data")
             return
 
         event = TraderUpdateEvent(
             account_id=proto.ctid_trader_account_id,
             balance=trader.balance,
             leverage_in_cents=trader.leverage_in_cents if trader.leverage_in_cents else None,
-            money_digits=trader.money_digits if trader.money_digits else 2,
+            money_digits=trader.money_digits or DEFAULT_MONEY_DIGITS,
         )
         await self._emitter.emit(event)
 
@@ -286,7 +236,7 @@ class EventRouter:
             account_id=proto.ctid_trader_account_id,
             position_id=proto.position_id,
             used_margin=proto.used_margin,
-            money_digits=proto.money_digits if proto.money_digits else 2,
+            money_digits=proto.money_digits or DEFAULT_MONEY_DIGITS,
         )
         await self._emitter.emit(event)
 
@@ -378,7 +328,7 @@ class EventRouter:
             position_id=proto.position_id,
             order_id=proto.order_id,
             stop_price=Decimal(str(proto.stop_price)),
-            timestamp=self._timestamp_to_datetime(proto.utc_last_update_timestamp),
+            timestamp=timestamp_to_datetime(proto.utc_last_update_timestamp),
         )
         await self._emitter.emit(event)
 
@@ -395,12 +345,3 @@ class EventRouter:
         )
         logger.error("Margin call triggered: account=%d type=%s", event.account_id, event.margin_call_type)
         await self._emitter.emit(event)
-
-    # -------------------------------------------------------------------------
-    # Helpers
-    # -------------------------------------------------------------------------
-
-    @staticmethod
-    def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
-        """Convert millisecond timestamp to datetime."""
-        return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)

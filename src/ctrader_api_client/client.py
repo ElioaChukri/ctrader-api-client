@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, overload
 
+from ._internal import Clock
 from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
 from .auth import AuthManager, AuthTrigger
 from .config import ClientConfig
@@ -24,9 +25,11 @@ from .events import (
     SpotEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
+    TokenRefreshFailedEvent,
     TraderUpdateEvent,
     TrailingStopChangedEvent,
 )
+from .exceptions import TokenRefreshError
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ T_AccountIdOnly = TypeVar(
     SymbolChangedEvent,
     TrailingStopChangedEvent,
     MarginCallTriggerEvent,
+    TokenRefreshFailedEvent,
 )
 
 # Events that support no filters
@@ -106,11 +110,16 @@ class CTraderClient:
         protocol: Low-level protocol access for advanced usage.
     """
 
-    def __init__(self, config: ClientConfig) -> None:
+    def __init__(self, config: ClientConfig, *, _clock: Clock | None = None) -> None:
         """Initialize the client.
 
         Args:
             config: Client configuration including credentials and settings.
+
+        The leading-underscore ``_clock`` parameter is an internal test seam for
+        injecting a deterministic time source into the heartbeat and token-refresh
+        timers. It defaults to a monotonic clock backed by real time and is not
+        part of the public API.
         """
         self._config = config
 
@@ -130,6 +139,7 @@ class CTraderClient:
             protocol=self._protocol,
             interval=config.heartbeat_interval,
             timeout=config.heartbeat_timeout,
+            clock=_clock,
         )
 
         # Event system
@@ -144,7 +154,11 @@ class CTraderClient:
             protocol=self._protocol,
             client_id=config.client_id,
             client_secret=config.client_secret,
+            refresh_policy=config.refresh_policy,
+            reauth_policy=config.reauth_policy,
+            clock=_clock,
             on_account_ready=self._emit_ready_event,
+            on_refresh_failed=self._emit_refresh_failed_event,
         )
 
         # API namespaces
@@ -168,7 +182,8 @@ class CTraderClient:
         self._connected = False
 
         # Set up reconnection handler
-        self._protocol._on_reconnect = self._handle_reconnect
+        self._protocol.set_reconnect_handler(self._handle_reconnect)
+        self._protocol.set_disconnect_handler(self._handle_disconnect)
 
         # Recover accounts dropped by a server-side disconnect
         self._emitter.subscribe(AccountDisconnectEvent, self._handle_account_disconnect)
@@ -322,6 +337,19 @@ class CTraderClient:
         is_reconnect = trigger in (AuthTrigger.RECONNECT, AuthTrigger.ACCOUNT_REAUTH)
         await self._emitter.emit(ReadyEvent(account_id=account_id, is_reconnect=is_reconnect))
 
+    async def _emit_refresh_failed_event(self, account_id: int, error: TokenRefreshError) -> None:
+        """Emit TokenRefreshFailedEvent when a token refresh exhausts its retries.
+
+        Called by AuthManager, which keeps the existing credentials and retries
+        on the next check interval. A repeating event means the refresh token is
+        no longer usable and the account must be re-authorized out of band.
+
+        Args:
+            account_id: The account whose token could not be refreshed.
+            error: The refresh failure, including its underlying cause.
+        """
+        await self._emitter.emit(TokenRefreshFailedEvent(account_id=account_id, error=error))
+
     async def _handle_account_disconnect(self, event: AccountDisconnectEvent) -> None:
         """Route a server-side account disconnect into recovery re-auth."""
         self._auth.handle_account_disconnect(event.account_id)
@@ -360,7 +388,8 @@ class CTraderClient:
             return
 
         # Re-authenticate all previously authenticated accounts
-        for account_id, credentials in list(self._auth._accounts.items()):
+        for credentials in self._auth.all_credentials():
+            account_id = credentials.account_id
             try:
                 await self._auth.authenticate_account(credentials, trigger=AuthTrigger.RECONNECT)
                 restored.append(account_id)
@@ -377,6 +406,16 @@ class CTraderClient:
                 failed_accounts=tuple(failed),
             )
         )
+
+    async def _handle_disconnect(self) -> None:
+        """Discard the state that died with the connection.
+
+        Account sessions live on the server side of the link, so a dropped link
+        means they are gone. Forgetting them here keeps `is_account_authorized`
+        honest while the client is offline; the credentials are kept so the
+        reconnect handler can re-establish the sessions.
+        """
+        self._auth.handle_connection_lost()
 
     async def __aenter__(self) -> CTraderClient:
         """Async context manager entry.

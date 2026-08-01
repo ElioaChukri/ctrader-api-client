@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
+import betterproto
+
+from .._internal import money_divisor
 from .._internal.proto import (
     ProtoOACancelOrderReq,
     ProtoOADealListByPositionIdReq,
@@ -12,7 +14,6 @@ from .._internal.proto import (
     ProtoOADealListReq,
     ProtoOADealListRes,
     ProtoOAExecutionEvent,
-    ProtoOAExecutionType,
     ProtoOAGetPositionUnrealizedPnLReq,
     ProtoOAGetPositionUnrealizedPnLRes,
     ProtoOAOrderErrorEvent,
@@ -21,8 +22,8 @@ from .._internal.proto import (
     ProtoOAReconcileReq,
     ProtoOAReconcileRes,
 )
-from ..enums import ExecutionType, OrderSide
 from ..events import ExecutionEvent
+from ..events._execution import execution_event_from_proto
 from ..exceptions import APIError
 from ..models import Deal, Order, Position, PositionUnrealizedPnL
 from ..models.requests import (
@@ -31,10 +32,7 @@ from ..models.requests import (
     ClosePositionRequest,
     NewOrderRequest,
 )
-
-
-if TYPE_CHECKING:
-    from ..connection import Protocol
+from ._base import BaseAPI
 
 
 logger = logging.getLogger(__name__)
@@ -57,22 +55,6 @@ def _raise_if_order_error(response: object) -> None:
         )
 
 
-# Map ProtoOAExecutionType enum values to our ExecutionType
-_EXECUTION_TYPE_MAP: dict[int, ExecutionType] = {
-    ProtoOAExecutionType.ORDER_ACCEPTED: ExecutionType.ORDER_ACCEPTED,
-    ProtoOAExecutionType.ORDER_FILLED: ExecutionType.ORDER_FILLED,
-    ProtoOAExecutionType.ORDER_REPLACED: ExecutionType.ORDER_REPLACED,
-    ProtoOAExecutionType.ORDER_CANCELLED: ExecutionType.ORDER_CANCELLED,
-    ProtoOAExecutionType.ORDER_EXPIRED: ExecutionType.ORDER_EXPIRED,
-    ProtoOAExecutionType.ORDER_REJECTED: ExecutionType.ORDER_REJECTED,
-    ProtoOAExecutionType.ORDER_CANCEL_REJECTED: ExecutionType.ORDER_CANCEL_REJECTED,
-    ProtoOAExecutionType.SWAP: ExecutionType.SWAP,
-    ProtoOAExecutionType.DEPOSIT_WITHDRAW: ExecutionType.DEPOSIT_WITHDRAW,
-    ProtoOAExecutionType.ORDER_PARTIAL_FILL: ExecutionType.ORDER_PARTIAL_FILL,
-    ProtoOAExecutionType.BONUS_DEPOSIT_WITHDRAW: ExecutionType.BONUS_DEPOSIT_WITHDRAW,
-}
-
-
 def _proto_to_execution_event(proto: ProtoOAExecutionEvent) -> ExecutionEvent:
     """Convert ProtoOAExecutionEvent to ExecutionEvent.
 
@@ -85,52 +67,16 @@ def _proto_to_execution_event(proto: ProtoOAExecutionEvent) -> ExecutionEvent:
     Raises:
         APIError: If execution type is unknown.
     """
-    exec_type = _EXECUTION_TYPE_MAP.get(proto.execution_type)
-    if exec_type is None:
+    event = execution_event_from_proto(proto)
+    if event is None:
         raise APIError(
             error_code="UNKNOWN_EXECUTION_TYPE",
             description=f"Unknown execution type: {proto.execution_type}",
         )
-
-    # Map order side
-    side = OrderSide.BUY
-    if proto.order and proto.order.trade_data:
-        if proto.order.trade_data.trade_side == 2:
-            side = OrderSide.SELL
-
-    # Extract order details
-    order_id = proto.order.order_id if proto.order else 0
-    position_id = proto.position.position_id if proto.position else None
-    symbol_id = proto.order.trade_data.symbol_id if proto.order and proto.order.trade_data else 0
-
-    # Extract deal details
-    filled_volume = None
-    fill_price = None
-    timestamp = datetime.now(UTC)
-
-    if proto.deal:
-        filled_volume = proto.deal.filled_volume if proto.deal.filled_volume else None
-        if proto.deal.execution_price:
-            fill_price = Decimal(str(proto.deal.execution_price))
-        if proto.deal.execution_timestamp:
-            timestamp = datetime.fromtimestamp(proto.deal.execution_timestamp / 1000, tz=UTC)
-
-    return ExecutionEvent(
-        account_id=proto.ctid_trader_account_id,
-        execution_type=exec_type,
-        order_id=order_id,
-        position_id=position_id,
-        symbol_id=symbol_id,
-        side=side,
-        filled_volume=filled_volume,
-        fill_price=fill_price,
-        timestamp=timestamp,
-        is_server_event=proto.is_server_event if proto.is_server_event else False,
-        error_code=proto.error_code if proto.error_code else None,
-    )
+    return event
 
 
-class TradingAPI:
+class TradingAPI(BaseAPI):
     """Trading operations: orders and positions.
 
     Provides methods for order placement, modification, cancellation,
@@ -158,15 +104,30 @@ class TradingAPI:
         ```
     """
 
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the trading API.
+    async def _execute_trade(
+        self,
+        request: betterproto.Message,
+        timeout: float | None,
+    ) -> ExecutionEvent:
+        """Send a trade request and convert its execution reply.
 
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
+        A rejected trade comes back as an order error rather than a generic
+        error response, so that has to be checked before the reply type.
         """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
+        response = await self._protocol.send_request(
+            request,
+            timeout=self._timeout(timeout),
+        )
+
+        _raise_if_order_error(response)
+
+        if not isinstance(response, ProtoOAExecutionEvent):
+            raise APIError(
+                error_code="UNEXPECTED_RESPONSE",
+                description=f"Expected ProtoOAExecutionEvent, got {type(response).__name__}",
+            )
+
+        return _proto_to_execution_event(response)
 
     async def get_unrealized_pnl_per_position(self, account_id: int) -> list[PositionUnrealizedPnL]:
         """Get unrealized PnL for each open position.
@@ -179,18 +140,13 @@ class TradingAPI:
         """
         request = ProtoOAGetPositionUnrealizedPnLReq(ctid_trader_account_id=account_id)
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=self._default_timeout,
+            ProtoOAGetPositionUnrealizedPnLRes,
+            timeout=self._timeout(None),
         )
 
-        if not isinstance(response, ProtoOAGetPositionUnrealizedPnLRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAGetPositionUnrealizedPnLRes, got {type(response).__name__}",
-            )
-
-        divisor = 10**response.money_digits
+        divisor = money_divisor(response.money_digits)
         return [
             PositionUnrealizedPnL(
                 position_id=p.position_id,
@@ -235,22 +191,7 @@ class TradingAPI:
             request.order_type.name,
             request.volume,
         )
-        proto_request = request.to_proto(account_id)
-
-        response = await self._protocol.send_request(
-            proto_request,
-            timeout=timeout or self._default_timeout,
-        )
-
-        _raise_if_order_error(response)
-
-        if not isinstance(response, ProtoOAExecutionEvent):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAExecutionEvent, got {type(response).__name__}",
-            )
-
-        return _proto_to_execution_event(response)
+        return await self._execute_trade(request.to_proto(account_id), timeout)
 
     async def amend_order(
         self,
@@ -273,22 +214,7 @@ class TradingAPI:
             CTraderConnectionTimeoutError: If request times out.
         """
         logger.debug("Amending order: account=%d order=%d", account_id, request.order_id)
-        proto_request = request.to_proto(account_id)
-
-        response = await self._protocol.send_request(
-            proto_request,
-            timeout=timeout or self._default_timeout,
-        )
-
-        _raise_if_order_error(response)
-
-        if not isinstance(response, ProtoOAExecutionEvent):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAExecutionEvent, got {type(response).__name__}",
-            )
-
-        return _proto_to_execution_event(response)
+        return await self._execute_trade(request.to_proto(account_id), timeout)
 
     async def cancel_order(
         self,
@@ -316,20 +242,7 @@ class TradingAPI:
             order_id=order_id,
         )
 
-        response = await self._protocol.send_request(
-            request,
-            timeout=timeout or self._default_timeout,
-        )
-
-        _raise_if_order_error(response)
-
-        if not isinstance(response, ProtoOAExecutionEvent):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAExecutionEvent, got {type(response).__name__}",
-            )
-
-        return _proto_to_execution_event(response)
+        return await self._execute_trade(request, timeout)
 
     async def close_position(
         self,
@@ -352,22 +265,7 @@ class TradingAPI:
             CTraderConnectionTimeoutError: If request times out.
         """
         logger.debug("Closing position: account=%d position=%d", account_id, request.position_id)
-        proto_request = request.to_proto(account_id)
-
-        response = await self._protocol.send_request(
-            proto_request,
-            timeout=timeout or self._default_timeout,
-        )
-
-        _raise_if_order_error(response)
-
-        if not isinstance(response, ProtoOAExecutionEvent):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAExecutionEvent, got {type(response).__name__}",
-            )
-
-        return _proto_to_execution_event(response)
+        return await self._execute_trade(request.to_proto(account_id), timeout)
 
     async def amend_position(
         self,
@@ -390,22 +288,7 @@ class TradingAPI:
             CTraderConnectionTimeoutError: If request times out.
         """
         logger.debug("Amending position: account=%d position=%d", account_id, request.position_id)
-        proto_request = request.to_proto(account_id)
-
-        response = await self._protocol.send_request(
-            proto_request,
-            timeout=timeout or self._default_timeout,
-        )
-
-        _raise_if_order_error(response)
-
-        if not isinstance(response, ProtoOAExecutionEvent):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAExecutionEvent, got {type(response).__name__}",
-            )
-
-        return _proto_to_execution_event(response)
+        return await self._execute_trade(request.to_proto(account_id), timeout)
 
     async def get_open_positions(
         self,
@@ -427,16 +310,11 @@ class TradingAPI:
         """
         request = ProtoOAReconcileReq(ctid_trader_account_id=account_id)
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAReconcileRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAReconcileRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAReconcileRes, got {type(response).__name__}",
-            )
 
         return [Position.from_proto(p) for p in response.position]
 
@@ -473,16 +351,11 @@ class TradingAPI:
             to_timestamp=int(to_timestamp.timestamp() * 1000) if to_timestamp else None,  # type: ignore [arg-type]
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAOrderListRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAOrderListRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAOrderListRes, got {type(response).__name__}",
-            )
 
         return [Order.from_proto(o) for o in response.order]
 
@@ -506,16 +379,11 @@ class TradingAPI:
         """
         request = ProtoOAOrderListReq(ctid_trader_account_id=account_id)
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAOrderListRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAOrderListRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAOrderListRes, got {type(response).__name__}",
-            )
 
         orders = [Order.from_proto(o) for o in response.order]
 
@@ -546,16 +414,11 @@ class TradingAPI:
             position_id=position_id,
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=self._default_timeout,
+            ProtoOADealListByPositionIdRes,
+            timeout=self._timeout(None),
         )
-
-        if not isinstance(response, ProtoOADealListByPositionIdRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOADealListRes, got {type(response).__name__}",
-            )
 
         return [Deal.from_proto(d) for d in response.deal]
 
@@ -591,15 +454,10 @@ class TradingAPI:
             to_timestamp=int(to_timestamp.timestamp() * 1000),
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOADealListRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOADealListRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOADealListRes, got {type(response).__name__}",
-            )
 
         return [Deal.from_proto(d) for d in response.deal]

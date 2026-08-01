@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from .._internal import money_divisor, timestamp_to_datetime
 from .._internal.proto import ProtoOAAccessRights, ProtoOAAccountType
 from ..enums import AccessRights, AccountType
 from ._base import FrozenModel
@@ -11,11 +12,6 @@ from ._base import FrozenModel
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOACtidTraderAccount, ProtoOATrader
-
-
-def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
-    """Convert millisecond timestamp to datetime."""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
 
 
 _ACCOUNT_TYPE_MAP: dict[int, AccountType] = {
@@ -71,10 +67,10 @@ class AccountSummary(FrozenModel):
             trader_login=proto.trader_login,
             broker_name=proto.broker_title_short or "",
             last_closing_deal_timestamp=(
-                _timestamp_to_datetime(proto.last_closing_deal_timestamp) if proto.last_closing_deal_timestamp else None
+                timestamp_to_datetime(proto.last_closing_deal_timestamp) if proto.last_closing_deal_timestamp else None
             ),
             last_balance_update_timestamp=(
-                _timestamp_to_datetime(proto.last_balance_update_timestamp)
+                timestamp_to_datetime(proto.last_balance_update_timestamp)
                 if proto.last_balance_update_timestamp
                 else None
             ),
@@ -144,8 +140,7 @@ class Account(FrozenModel):
         Returns:
             A new Account instance.
         """
-        money_digits = proto.money_digits if proto.money_digits else 2
-        divisor = 10**money_digits
+        divisor = money_divisor(proto.money_digits)
         return cls(
             account_id=proto.ctid_trader_account_id,
             trader_login=proto.trader_login,
@@ -158,7 +153,7 @@ class Account(FrozenModel):
             swap_free=proto.swap_free,
             is_limited_risk=proto.is_limited_risk,
             registration_timestamp=(
-                _timestamp_to_datetime(proto.registration_timestamp) if proto.registration_timestamp else None
+                timestamp_to_datetime(proto.registration_timestamp) if proto.registration_timestamp else None
             ),
             max_leverage=proto.max_leverage if proto.max_leverage else None,
             balance_version=proto.balance_version if proto.balance_version else None,

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from .._internal.proto import (
     ProtoOAGetTickDataReq,
@@ -26,12 +25,8 @@ from .._internal.proto import (
     ProtoOAUnsubscribeSpotsRes,
 )
 from ..enums import TrendbarPeriod
-from ..exceptions import APIError
 from ..models import TickData, Trendbar
-
-
-if TYPE_CHECKING:
-    from ..connection import Protocol
+from ._base import BaseAPI
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +51,7 @@ _PERIOD_TO_PROTO: dict[TrendbarPeriod, int] = {
 }
 
 
-class MarketDataAPI:
+class MarketDataAPI(BaseAPI):
     """Market data subscriptions and historical data.
 
     Provides methods to subscribe to real-time market data (spots, trendbars,
@@ -84,16 +79,6 @@ class MarketDataAPI:
         )
         ```
     """
-
-    def __init__(self, protocol: Protocol, default_timeout: float = 30.0) -> None:
-        """Initialize the market data API.
-
-        Args:
-            protocol: The protocol instance for sending requests.
-            default_timeout: Default request timeout in seconds.
-        """
-        self._protocol = protocol
-        self._default_timeout = default_timeout
 
     # -------------------------------------------------------------------------
     # Spot Subscriptions
@@ -126,16 +111,11 @@ class MarketDataAPI:
             subscribe_to_spot_timestamp=True,
         )
 
-        response = await self._protocol.send_request(
+        await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOASubscribeSpotsRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOASubscribeSpotsRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASubscribeSpotsRes, got {type(response).__name__}",
-            )
 
     async def unsubscribe_spots(
         self,
@@ -160,16 +140,11 @@ class MarketDataAPI:
             symbol_id=symbol_ids,
         )
 
-        response = await self._protocol.send_request(
+        await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAUnsubscribeSpotsRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAUnsubscribeSpotsRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAUnsubscribeSpotsRes, got {type(response).__name__}",
-            )
 
     # -------------------------------------------------------------------------
     # Trendbar Subscriptions
@@ -206,16 +181,11 @@ class MarketDataAPI:
             period=ProtoOATrendbarPeriod(_PERIOD_TO_PROTO[period]),
         )
 
-        response = await self._protocol.send_request(
+        await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOASubscribeLiveTrendbarRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOASubscribeLiveTrendbarRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASubscribeLiveTrendbarRes, got {type(response).__name__}",
-            )
 
     async def unsubscribe_trendbars(
         self,
@@ -243,16 +213,11 @@ class MarketDataAPI:
             period=ProtoOATrendbarPeriod(_PERIOD_TO_PROTO[period]),
         )
 
-        response = await self._protocol.send_request(
+        await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAUnsubscribeLiveTrendbarRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAUnsubscribeLiveTrendbarRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAUnsubscribeLiveTrendbarRes, got {type(response).__name__}",
-            )
 
     # -------------------------------------------------------------------------
     # Depth Subscriptions
@@ -284,16 +249,11 @@ class MarketDataAPI:
             symbol_id=symbol_ids,
         )
 
-        response = await self._protocol.send_request(
+        await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOASubscribeDepthQuotesRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOASubscribeDepthQuotesRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOASubscribeDepthQuotesRes, got {type(response).__name__}",
-            )
 
     async def unsubscribe_depth(
         self,
@@ -318,16 +278,11 @@ class MarketDataAPI:
             symbol_id=symbol_ids,
         )
 
-        response = await self._protocol.send_request(
+        await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAUnsubscribeDepthQuotesRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAUnsubscribeDepthQuotesRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAUnsubscribeDepthQuotesRes, got {type(response).__name__}",
-            )
 
     # -------------------------------------------------------------------------
     # Historical Data
@@ -371,16 +326,11 @@ class MarketDataAPI:
             to_timestamp=int(to_timestamp.timestamp() * 1000),
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAGetTrendbarsRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAGetTrendbarsRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAGetTrendbarsRes, got {type(response).__name__}",
-            )
 
         return [Trendbar.from_proto(t, historical=True) for t in response.trendbar]
 
@@ -424,15 +374,10 @@ class MarketDataAPI:
             to_timestamp=int(to_timestamp.timestamp() * 1000),
         )
 
-        response = await self._protocol.send_request(
+        response = await self._protocol.request(
             request,
-            timeout=timeout or self._default_timeout,
+            ProtoOAGetTickDataRes,
+            timeout=self._timeout(timeout),
         )
-
-        if not isinstance(response, ProtoOAGetTickDataRes):
-            raise APIError(
-                error_code="UNEXPECTED_RESPONSE",
-                description=f"Expected ProtoOAGetTickDataRes, got {type(response).__name__}",
-            )
 
         return TickData.from_proto_list(response.tick_data)

@@ -158,6 +158,15 @@ drop. Check current authorization with `client.is_account_authorized(account_id)
     options:
       show_source: false
 
+::: ctrader_api_client.events.TokenRefreshFailedEvent
+    options:
+      show_source: false
+
+The client keeps the existing credentials and retries on the next refresh check,
+so a single event usually means a transient outage. If the event keeps repeating,
+the refresh token is no longer usable and the account has to be re-authorized out
+of band.
+
 ## Symbol Events
 
 ::: ctrader_api_client.events.SymbolChangedEvent

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from .._internal import money_divisor, timestamp_to_datetime
 from .._internal.proto import ProtoOADealStatus
 from ..enums import DealStatus, OrderSide
 from ._base import FrozenModel
@@ -11,11 +12,6 @@ from ._base import FrozenModel
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOAClosePositionDetail, ProtoOADeal
-
-
-def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
-    """Convert millisecond timestamp to datetime."""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
 
 
 _DEAL_STATUS_MAP: dict[int, DealStatus] = {
@@ -66,8 +62,7 @@ class CloseDetail(FrozenModel):
         Returns:
             A new CloseDetail instance.
         """
-        money_digits = proto.money_digits if proto.money_digits else 2
-        divisor = 10**money_digits
+        divisor = money_divisor(proto.money_digits)
         return cls(
             entry_price=Decimal(str(proto.entry_price)),
             closed_volume=proto.closed_volume,
@@ -154,8 +149,7 @@ class Deal(FrozenModel):
         # Determine side
         side = OrderSide.BUY if proto.trade_side == 1 else OrderSide.SELL
 
-        money_digits = proto.money_digits if proto.money_digits else 2
-        divisor = 10**money_digits
+        divisor = money_divisor(proto.money_digits)
         return cls(
             deal_id=proto.deal_id,
             order_id=proto.order_id,
@@ -165,12 +159,12 @@ class Deal(FrozenModel):
             volume=proto.volume,
             filled_volume=proto.filled_volume,
             execution_price=Decimal(str(proto.execution_price)),
-            execution_timestamp=_timestamp_to_datetime(proto.execution_timestamp),
+            execution_timestamp=timestamp_to_datetime(proto.execution_timestamp),
             status=_DEAL_STATUS_MAP.get(proto.deal_status, DealStatus.FILLED),
             commission=Decimal(proto.commission) / divisor if proto.commission else Decimal(0),
-            create_timestamp=_timestamp_to_datetime(proto.create_timestamp) if proto.create_timestamp else None,
+            create_timestamp=timestamp_to_datetime(proto.create_timestamp) if proto.create_timestamp else None,
             last_update_timestamp=(
-                _timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
+                timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
             ),
             margin_rate=Decimal(str(proto.margin_rate)) if proto.margin_rate else None,
             base_to_usd_rate=(

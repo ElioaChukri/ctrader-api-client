@@ -36,6 +36,7 @@ from .types import (
     SpotEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
+    TokenRefreshFailedEvent,
     TraderUpdateEvent,
     TrailingStopChangedEvent,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "SpotEvent",
     "SymbolChangedEvent",
     "TokenInvalidatedEvent",
+    "TokenRefreshFailedEvent",
     "TraderUpdateEvent",
     "TrailingStopChangedEvent",
 ]

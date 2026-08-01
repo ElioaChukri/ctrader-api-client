@@ -4,18 +4,16 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from .._internal.proto import ProtoOAOrderTriggerMethod, ProtoOAPositionStatus
+import betterproto
+
+from .._internal import DEFAULT_MONEY_DIGITS, money_divisor, timestamp_to_datetime
+from .._internal.proto import ProtoOAOrderTriggerMethod, ProtoOAPositionStatus, ProtoOATradeSide
 from ..enums import OrderSide, PositionStatus, StopTriggerMethod
 from ._base import FrozenModel
 
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOAPosition
-
-
-def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
-    """Convert millisecond timestamp to datetime."""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
 
 
 _POSITION_STATUS_MAP: dict[int, PositionStatus] = {
@@ -101,30 +99,33 @@ class Position(FrozenModel):
         Returns:
             A new Position instance.
         """
+        # An absent sub-message parses into a default instance, so presence has
+        # to be read from the wire rather than from truthiness.
         trade_data = proto.trade_data
+        has_trade_data = betterproto.serialized_on_wire(trade_data)
 
         # Determine side from trade_data
         side = OrderSide.BUY
-        if trade_data and trade_data.trade_side == 2:
+        if has_trade_data and trade_data.trade_side == ProtoOATradeSide.SELL:
             side = OrderSide.SELL
 
         # Get open timestamp
         open_ts = datetime.now(UTC)
-        if trade_data and trade_data.open_timestamp:
-            open_ts = _timestamp_to_datetime(trade_data.open_timestamp)
+        if has_trade_data and trade_data.open_timestamp:
+            open_ts = timestamp_to_datetime(trade_data.open_timestamp)
 
-        money_digits = proto.money_digits if proto.money_digits else 2
-        divisor = 10**money_digits
+        money_digits = proto.money_digits or DEFAULT_MONEY_DIGITS
+        divisor = money_divisor(money_digits)
 
         return cls(
             position_id=proto.position_id,
-            symbol_id=trade_data.symbol_id if trade_data else 0,
+            symbol_id=trade_data.symbol_id if has_trade_data else 0,
             side=side,
-            volume=trade_data.volume if trade_data else 0,
+            volume=trade_data.volume if has_trade_data else 0,
             entry_price=Decimal(str(proto.price)) if proto.price else Decimal(0),
             status=_POSITION_STATUS_MAP.get(proto.position_status, PositionStatus.OPEN),
             open_timestamp=open_ts,
-            money_digits=proto.money_digits if proto.money_digits else 2,
+            money_digits=money_digits,
             stop_loss=Decimal(str(proto.stop_loss)) if proto.stop_loss else None,
             take_profit=Decimal(str(proto.take_profit)) if proto.take_profit else None,
             trailing_stop_loss=proto.trailing_stop_loss,
@@ -134,14 +135,14 @@ class Position(FrozenModel):
             commission=Decimal(proto.commission) / divisor if proto.commission else Decimal(0),
             used_margin=Decimal(proto.used_margin) / divisor if proto.used_margin else Decimal(0),
             margin_rate=Decimal(str(proto.margin_rate)) if proto.margin_rate else None,
-            label=trade_data.label if trade_data else "",
-            comment=trade_data.comment if trade_data else "",
+            label=trade_data.label if has_trade_data else "",
+            comment=trade_data.comment if has_trade_data else "",
             last_update_timestamp=(
-                _timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
+                timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
             ),
             close_timestamp=(
-                _timestamp_to_datetime(trade_data.close_timestamp)
-                if trade_data and trade_data.close_timestamp
+                timestamp_to_datetime(trade_data.close_timestamp)
+                if has_trade_data and trade_data.close_timestamp
                 else None
             ),
         )

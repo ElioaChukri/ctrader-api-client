@@ -4,18 +4,22 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from .._internal.proto import ProtoOAOrderStatus, ProtoOAOrderTriggerMethod, ProtoOAOrderType, ProtoOATimeInForce
+import betterproto
+
+from .._internal import timestamp_to_datetime
+from .._internal.proto import (
+    ProtoOAOrderStatus,
+    ProtoOAOrderTriggerMethod,
+    ProtoOAOrderType,
+    ProtoOATimeInForce,
+    ProtoOATradeSide,
+)
 from ..enums import OrderSide, OrderStatus, OrderType, StopTriggerMethod, TimeInForce
 from ._base import FrozenModel
 
 
 if TYPE_CHECKING:
     from .._internal.proto import ProtoOAOrder
-
-
-def _timestamp_to_datetime(timestamp_ms: int) -> datetime:
-    """Convert millisecond timestamp to datetime."""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
 
 
 _ORDER_TYPE_MAP: dict[int, OrderType] = {
@@ -151,25 +155,28 @@ class Order(FrozenModel):
         Returns:
             A new Order instance.
         """
+        # An absent sub-message parses into a default instance, so presence has
+        # to be read from the wire rather than from truthiness.
         trade_data = proto.trade_data
+        has_trade_data = betterproto.serialized_on_wire(trade_data)
 
         # Determine side from trade_data
         side = OrderSide.BUY
-        if trade_data and trade_data.trade_side == 2:
+        if has_trade_data and trade_data.trade_side == ProtoOATradeSide.SELL:
             side = OrderSide.SELL
 
         # Get open timestamp
         open_ts = datetime.now(UTC)
-        if trade_data and trade_data.open_timestamp:
-            open_ts = _timestamp_to_datetime(trade_data.open_timestamp)
+        if has_trade_data and trade_data.open_timestamp:
+            open_ts = timestamp_to_datetime(trade_data.open_timestamp)
 
         return cls(
             order_id=proto.order_id,
-            symbol_id=trade_data.symbol_id if trade_data else 0,
+            symbol_id=trade_data.symbol_id if has_trade_data else 0,
             side=side,
             order_type=_ORDER_TYPE_MAP.get(proto.order_type, OrderType.MARKET),
             status=_ORDER_STATUS_MAP.get(proto.order_status, OrderStatus.ACCEPTED),
-            volume=trade_data.volume if trade_data else 0,
+            volume=trade_data.volume if has_trade_data else 0,
             time_in_force=_TIME_IN_FORCE_MAP.get(proto.time_in_force, TimeInForce.GOOD_TILL_CANCEL),
             open_timestamp=open_ts,
             limit_price=Decimal(str(proto.limit_price)) if proto.limit_price else None,
@@ -179,7 +186,7 @@ class Order(FrozenModel):
             execution_price=Decimal(str(proto.execution_price)) if proto.execution_price else None,
             executed_volume=proto.executed_volume if proto.executed_volume else 0,
             expiration_timestamp=(
-                _timestamp_to_datetime(proto.expiration_timestamp) if proto.expiration_timestamp else None
+                timestamp_to_datetime(proto.expiration_timestamp) if proto.expiration_timestamp else None
             ),
             position_id=proto.position_id if proto.position_id else None,
             base_slippage_price=Decimal(str(proto.base_slippage_price)) if proto.base_slippage_price else None,
@@ -189,12 +196,12 @@ class Order(FrozenModel):
             is_closing_order=proto.closing_order,
             is_stop_out=proto.is_stop_out,
             trailing_stop_loss=proto.trailing_stop_loss,
-            guaranteed_stop_loss=trade_data.guaranteed_stop_loss if trade_data else False,
+            guaranteed_stop_loss=trade_data.guaranteed_stop_loss if has_trade_data else False,
             stop_trigger_method=_TRIGGER_METHOD_MAP.get(proto.stop_trigger_method, StopTriggerMethod.TRADE),
             client_order_id=proto.client_order_id or "",
-            label=trade_data.label if trade_data else "",
-            comment=trade_data.comment if trade_data else "",
+            label=trade_data.label if has_trade_data else "",
+            comment=trade_data.comment if has_trade_data else "",
             last_update_timestamp=(
-                _timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
+                timestamp_to_datetime(proto.utc_last_update_timestamp) if proto.utc_last_update_timestamp else None
             ),
         )

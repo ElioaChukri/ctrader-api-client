@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-import time
 
 import anyio
 import anyio.abc
 import betterproto
 
+from .._internal import Clock, MonotonicClock
 from .._internal.proto import ProtoHeartbeatEvent
 from .protocol import Protocol
 
@@ -26,6 +26,7 @@ class HeartbeatManager:
         protocol: Protocol,
         interval: float = 10.0,
         timeout: float = 30.0,
+        clock: Clock | None = None,
     ) -> None:
         """Initialize the heartbeat manager.
 
@@ -33,10 +34,12 @@ class HeartbeatManager:
             protocol: The protocol instance to send/receive through.
             interval: Seconds between heartbeat sends.
             timeout: Seconds without server heartbeat before triggering disconnect.
+            clock: Time source for the send interval and inactivity timer.
         """
         self._protocol = protocol
         self._interval = interval
         self._timeout = timeout
+        self._clock = clock if clock is not None else MonotonicClock()
         self._last_received: float = 0.0
         self._task_scope: anyio.CancelScope | None = None
         self._task_group: anyio.abc.TaskGroup | None = None
@@ -50,7 +53,7 @@ class HeartbeatManager:
         self._protocol.on_event(betterproto.Message, self._record_activity)
         # Keep heartbeat handler for debug logging
         self._protocol.on_event(ProtoHeartbeatEvent, self._on_heartbeat)
-        self._last_received = time.monotonic()
+        self._last_received = self._clock.now()
 
         # Start heartbeat loop in background
         self._task_group = anyio.create_task_group()
@@ -92,14 +95,14 @@ class HeartbeatManager:
         if self._task_scope is not None:
             self._task_scope.cancel()
 
-        self._last_received = time.monotonic()
+        self._last_received = self._clock.now()
         if self._task_group is not None:
             self._task_group.start_soon(self._heartbeat_loop)
         logger.debug("Heartbeat monitor restarted")
 
     async def _record_activity(self, _message: betterproto.Message) -> None:
         """Reset the inactivity timer on any received server message."""
-        self._last_received = time.monotonic()
+        self._last_received = self._clock.now()
 
     async def _on_heartbeat(self, _event: ProtoHeartbeatEvent) -> None:
         """Handler called when an explicit heartbeat is received from the server."""
@@ -110,10 +113,10 @@ class HeartbeatManager:
         with anyio.CancelScope() as scope:
             self._task_scope = scope
             while True:
-                await anyio.sleep(self._interval)
+                await self._clock.sleep(self._interval)
 
                 # Check if server heartbeat received recently
-                elapsed = time.monotonic() - self._last_received
+                elapsed = self._clock.now() - self._last_received
                 if 0 < self._timeout < elapsed:
                     logger.warning(
                         "Heartbeat timeout: no heartbeat received in %.1f seconds",

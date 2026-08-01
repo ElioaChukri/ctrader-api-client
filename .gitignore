@@ -12,3 +12,6 @@ wheels/
 # IDE-specific files
 .idea/
 .vscode/
+# Test artifacts
+.coverage
+.pytest_cache/
