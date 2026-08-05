@@ -161,10 +161,22 @@ drop. Check current authorization with `client.is_account_authorized(account_id)
 
 A disconnect the server reports is checked before it is published. Rotating an
 access token makes the server report one for a session it has not ended, so the
-client re-authenticates to find out which it is: an account that still holds its
-session is refused as already authorized, and nothing is published. What reaches
-a handler is therefore always a session that was really gone at the moment it
-was checked.
+client asks whether the account is still served on this connection: if it is,
+nothing is published. The check does not re-authenticate, because that answers
+for the token as much as for the session, and the rotation prompting the report
+is the very thing that would make such an answer unreliable.
+
+The check also waits for any token refresh on that account to finish first.
+Rotating a token means the server drops the old authorization and the client
+establishes a new one, and in between the account is genuinely unauthorized — it
+refuses everything, including the check. Since the refresh always begins before
+the report it provokes, waiting for it to settle is what keeps a moment the
+client itself created from reading as a lost session.
+
+A check that cannot be completed — a timeout, a link that has just gone — is not
+read as a disconnect either. The account is left as it was, and the next report
+is checked afresh. What reaches a handler is therefore always a session the
+server confirmed it was no longer serving.
 
 ::: ctrader_api_client.events.TokenInvalidatedEvent
     options:
