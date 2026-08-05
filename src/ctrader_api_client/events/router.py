@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol as TypingProtocol
 
 import betterproto
 
@@ -48,6 +49,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class SessionRecovery(TypingProtocol):
+    """Whatever knows how to restore an account session the server dropped."""
+
+    def handle_account_disconnect(self, account_id: int) -> None:
+        """Schedule re-authentication for the disconnected account."""
+        ...
+
+
 class EventRouter:
     """Routes proto events from Protocol to typed events on EventEmitter.
 
@@ -57,7 +66,7 @@ class EventRouter:
 
     Example:
         ```python
-        router = EventRouter(protocol, emitter)
+        router = EventRouter(protocol, emitter, auth)
         router.start()
 
         # Now proto events will be converted and emitted
@@ -71,92 +80,59 @@ class EventRouter:
         self,
         protocol: Protocol,
         emitter: EventEmitter,
+        recovery: SessionRecovery,
     ) -> None:
         """Initialize the event router.
 
         Args:
             protocol: The protocol instance to receive proto events from.
             emitter: The event emitter to publish typed events to.
+            recovery: Told directly about dropped account sessions, so restoring
+                them never depends on a consumer subscription.
         """
         self._protocol = protocol
         self._emitter = emitter
-        self._started = False
+        self._recovery = recovery
+        self._disposers: list[Callable[[], None]] = []
 
     @property
     def is_started(self) -> bool:
         """Whether the router is currently started."""
-        return self._started
+        return bool(self._disposers)
 
     def start(self) -> None:
         """Idempotent. Register handlers for all proto event types."""
-        if self._started:
+        if self._disposers:
             return
 
-        self._protocol.on_event(ProtoOASpotEvent, self._handle_spot)
-        self._protocol.on_event(ProtoOAExecutionEvent, self._handle_execution)
-        self._protocol.on_event(ProtoOAOrderErrorEvent, self._handle_order_error)
-        self._protocol.on_event(ProtoOATraderUpdatedEvent, self._handle_trader_update)
-        self._protocol.on_event(ProtoOAMarginChangedEvent, self._handle_margin_change)
-        self._protocol.on_event(ProtoOADepthEvent, self._handle_depth)
-        self._protocol.on_event(
-            ProtoOAAccountsTokenInvalidatedEvent,
-            self._handle_token_invalidated,
-        )
-        self._protocol.on_event(
-            ProtoOAClientDisconnectEvent,
-            self._handle_client_disconnect,
-        )
-        self._protocol.on_event(
-            ProtoOAAccountDisconnectEvent,
-            self._handle_account_disconnect,
-        )
-        self._protocol.on_event(ProtoOASymbolChangedEvent, self._handle_symbol_changed)
-        self._protocol.on_event(
-            ProtoOATrailingSLChangedEvent,
-            self._handle_trailing_stop_changed,
-        )
-        self._protocol.on_event(
-            ProtoOAMarginCallTriggerEvent,
-            self._handle_margin_call_trigger,
-        )
+        # Each registration returns its own undo, so stop() never has to name
+        # these pairings again and the two lists cannot drift apart.
+        self._disposers = [
+            self._protocol.on_event(ProtoOASpotEvent, self._handle_spot),
+            self._protocol.on_event(ProtoOAExecutionEvent, self._handle_execution),
+            self._protocol.on_event(ProtoOAOrderErrorEvent, self._handle_order_error),
+            self._protocol.on_event(ProtoOATraderUpdatedEvent, self._handle_trader_update),
+            self._protocol.on_event(ProtoOAMarginChangedEvent, self._handle_margin_change),
+            self._protocol.on_event(ProtoOADepthEvent, self._handle_depth),
+            self._protocol.on_event(ProtoOAAccountsTokenInvalidatedEvent, self._handle_token_invalidated),
+            self._protocol.on_event(ProtoOAClientDisconnectEvent, self._handle_client_disconnect),
+            self._protocol.on_event(ProtoOAAccountDisconnectEvent, self._handle_account_disconnect),
+            self._protocol.on_event(ProtoOASymbolChangedEvent, self._handle_symbol_changed),
+            self._protocol.on_event(ProtoOATrailingSLChangedEvent, self._handle_trailing_stop_changed),
+            self._protocol.on_event(ProtoOAMarginCallTriggerEvent, self._handle_margin_call_trigger),
+        ]
 
-        self._started = True
         logger.debug("Event router started")
 
     def stop(self) -> None:
         """Idempotent. Unregister all proto event handlers."""
-        if not self._started:
+        if not self._disposers:
             return
 
-        self._protocol.remove_handler(ProtoOASpotEvent, self._handle_spot)
-        self._protocol.remove_handler(ProtoOAExecutionEvent, self._handle_execution)
-        self._protocol.remove_handler(ProtoOAOrderErrorEvent, self._handle_order_error)
-        self._protocol.remove_handler(ProtoOATraderUpdatedEvent, self._handle_trader_update)
-        self._protocol.remove_handler(ProtoOAMarginChangedEvent, self._handle_margin_change)
-        self._protocol.remove_handler(ProtoOADepthEvent, self._handle_depth)
-        self._protocol.remove_handler(
-            ProtoOAAccountsTokenInvalidatedEvent,
-            self._handle_token_invalidated,
-        )
-        self._protocol.remove_handler(
-            ProtoOAClientDisconnectEvent,
-            self._handle_client_disconnect,
-        )
-        self._protocol.remove_handler(
-            ProtoOAAccountDisconnectEvent,
-            self._handle_account_disconnect,
-        )
-        self._protocol.remove_handler(ProtoOASymbolChangedEvent, self._handle_symbol_changed)
-        self._protocol.remove_handler(
-            ProtoOATrailingSLChangedEvent,
-            self._handle_trailing_stop_changed,
-        )
-        self._protocol.remove_handler(
-            ProtoOAMarginCallTriggerEvent,
-            self._handle_margin_call_trigger,
-        )
+        for dispose in self._disposers:
+            dispose()
+        self._disposers.clear()
 
-        self._started = False
         logger.debug("Event router stopped")
 
     # -------------------------------------------------------------------------
@@ -305,6 +281,7 @@ class EventRouter:
             account_id=proto.ctid_trader_account_id,
         )
         logger.warning("Account %d disconnected by server", event.account_id)
+        self._recovery.handle_account_disconnect(event.account_id)
         await self._emitter.emit(event)
 
     async def _handle_symbol_changed(

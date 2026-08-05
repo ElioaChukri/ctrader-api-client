@@ -9,6 +9,16 @@ if TYPE_CHECKING:
     from ._internal.proto import ProtoOAErrorRes
 
 
+# Codes the server uses when the token itself is the problem, rather than the
+# application, the account or the request.
+_TOKEN_ERROR_CODES = frozenset(
+    {
+        ProtoOAErrorCode.OA_AUTH_TOKEN_EXPIRED.name,
+        ProtoOAErrorCode.CH_ACCESS_TOKEN_INVALID.name,
+    }
+)
+
+
 class CTraderError(Exception):
     """Base exception for all cTrader API errors."""
 
@@ -187,6 +197,13 @@ class APIError(CTraderError):
     def is_rate_limited(self) -> bool:
         """Check if this error indicates rate limiting."""
         return self.error_code == ProtoOAErrorCode.REQUEST_FREQUENCY_EXCEEDED.name or self.retry_after is not None
+
+    def is_token_failure(self) -> bool:
+        """Whether the token is the problem, rather than the app, account or request.
+
+        A token failure cannot be retried back to life; it needs a new token.
+        """
+        return self.error_code in _TOKEN_ERROR_CODES
 
     def is_maintenance(self) -> bool:
         """Check if this error indicates server maintenance."""

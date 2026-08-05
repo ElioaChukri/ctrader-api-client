@@ -9,7 +9,6 @@ import pytest
 
 from ctrader_api_client import CTraderClient
 from ctrader_api_client._internal.proto import (
-    ProtoOAApplicationAuthReq,
     ProtoOASpotEvent,
     ProtoOATraderReq,
     ProtoOATraderRes,
@@ -21,33 +20,26 @@ from ...harness import FakeServer, Recorder, encode_frame, encode_message_frame,
 _ONE_MEGABYTE = 1024 * 1024
 
 
-def _echo_trader(request: ProtoOATraderReq) -> ProtoOATraderRes:
-    return ProtoOATraderRes(ctid_trader_account_id=request.ctid_trader_account_id)
-
-
+@pytest.mark.usefixtures("echoing_trader")
 async def test_oversized_frame_resets_the_connection(
     client: CTraderClient,
     server: FakeServer,
 ) -> None:
     """An impossible length prefix means the stream is desynchronised; reconnect."""
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
-
     await server.send_raw(struct.pack(">I", _ONE_MEGABYTE + 1))
     await server.wait_for_connections(2)
 
-    server.on(ProtoOATraderReq, _echo_trader)
     response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=3), ProtoOATraderRes)
 
     assert response.ctid_trader_account_id == 3
 
 
+@pytest.mark.usefixtures("echoing_trader")
 async def test_undecodable_payload_does_not_kill_the_connection(
     client: CTraderClient,
     server: FakeServer,
 ) -> None:
     """One bad message is skipped; the connection keeps serving later traffic."""
-    server.on(ProtoOATraderReq, _echo_trader)
-
     await server.send_raw(struct.pack(">I", 5) + b"\xff\xff\xff\xff\xff")
     response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=4), ProtoOATraderRes)
 
@@ -55,12 +47,11 @@ async def test_undecodable_payload_does_not_kill_the_connection(
     assert server.connection_count == 1
 
 
+@pytest.mark.usefixtures("echoing_trader")
 async def test_unknown_payload_type_does_not_kill_the_connection(
     client: CTraderClient,
     server: FakeServer,
 ) -> None:
-    server.on(ProtoOATraderReq, _echo_trader)
-
     await server.send_raw(encode_frame(payload_type=64999, payload=b""))
     response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=5), ProtoOATraderRes)
 
@@ -68,14 +59,13 @@ async def test_unknown_payload_type_does_not_kill_the_connection(
     assert server.connection_count == 1
 
 
+@pytest.mark.usefixtures("echoing_trader")
 async def test_a_single_bad_message_is_logged_once(
     client: CTraderClient,
     server: FakeServer,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The error path must not retry the same failure in a loop."""
-    server.on(ProtoOATraderReq, _echo_trader)
-
     with caplog.at_level(logging.WARNING, logger="ctrader_api_client.connection.protocol"):
         await server.send_raw(struct.pack(">I", 5) + b"\xff\xff\xff\xff\xff")
         await client.protocol.send_request(ProtoOATraderReq(ctid_trader_account_id=6))
@@ -83,6 +73,22 @@ async def test_a_single_bad_message_is_logged_once(
     failures = [record for record in caplog.records if "Error processing message" in record.getMessage()]
 
     assert len(failures) == 1
+
+
+@pytest.mark.usefixtures("echoing_trader")
+async def test_repeated_bad_messages_force_a_reconnect(
+    client: CTraderClient,
+    server: FakeServer,
+) -> None:
+    """A reader that keeps failing is a stuck reader, not noise to keep absorbing."""
+    bad_frame = struct.pack(">I", 5) + b"\xff\xff\xff\xff\xff"
+    for _ in range(15):
+        await server.send_raw(bad_frame)
+    await server.wait_for_connections(2)
+
+    response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=7), ProtoOATraderRes)
+
+    assert response.ctid_trader_account_id == 7
 
 
 async def test_message_split_across_packets_is_reassembled(

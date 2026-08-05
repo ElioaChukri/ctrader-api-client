@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, TypeVar, overload
 
-from ._internal import Clock
+import anyio
+
 from .api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
-from .auth import AuthManager, AuthTrigger
+from .auth import AuthManager, TokenStore
+from .composition import ClientGraph, build_graph
 from .config import ClientConfig
-from .connection import HeartbeatManager, Protocol, Transport
+from .connection import Protocol
 from .events import (
     AccountDisconnectEvent,
     ClientDisconnectEvent,
     DepthEvent,
     Event,
-    EventEmitter,
-    EventRouter,
     ExecutionEvent,
     MarginCallTriggerEvent,
     MarginChangeEvent,
@@ -23,13 +24,13 @@ from .events import (
     ReadyEvent,
     ReconnectedEvent,
     SpotEvent,
+    SubscriptionRestoreFailedEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
     TokenRefreshFailedEvent,
     TraderUpdateEvent,
     TrailingStopChangedEvent,
 )
-from .exceptions import TokenRefreshError
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ T_AccountIdOnly = TypeVar(
     TrailingStopChangedEvent,
     MarginCallTriggerEvent,
     TokenRefreshFailedEvent,
+    SubscriptionRestoreFailedEvent,
 )
 
 # Events that support no filters
@@ -64,6 +66,21 @@ T_NoFilters = TypeVar(
 )
 
 
+def _sole_failure(group: BaseExceptionGroup[BaseException]) -> BaseException:
+    """The one failure a task group wrapped, or the group when there were several.
+
+    The background tasks run in a task group, which reports even a single
+    failure as a group. Callers write `except CTraderConnectionFailedError`
+    around `async with client:`, not `except*`, so a lone failure is unwrapped
+    on its way out. Several failures stay a group, because that is what they
+    are.
+    """
+    failure: BaseException = group
+    while isinstance(failure, BaseExceptionGroup) and len(failure.exceptions) == 1:
+        failure = failure.exceptions[0]
+    return failure
+
+
 class CTraderClient:
     """Unified cTrader API client.
 
@@ -73,6 +90,7 @@ class CTraderClient:
     Example:
         ```python
         from ctrader_api_client import CTraderClient, ClientConfig
+        from ctrader_api_client.auth import AccountCredentials
         from ctrader_api_client.events import SpotEvent
 
         config = ClientConfig(
@@ -89,104 +107,81 @@ class CTraderClient:
 
 
         async with client:
-            await client.auth.authenticate_app()
-            creds = await client.auth.authenticate_by_trader_login(
-                trader_login=17091452,
+            account_id = await client.accounts.resolve_account_id(
                 access_token="...",
-                refresh_token="...",
-                expires_at=1778617423,
+                trader_login=17091452,
             )
-            await client.market_data.subscribe_spots(creds.account_id, [270])
+            await client.auth.authenticate_trader(
+                AccountCredentials(
+                    account_id=account_id,
+                    access_token="...",
+                    refresh_token="...",
+                    expires_at=1778617423,
+                )
+            )
+            await client.market_data.subscribe_spots(account_id, [270])
 
             await asyncio.Event().wait()  # Run forever
         ```
 
     Attributes:
-        auth: Authentication operations (app auth, account auth, token refresh).
-        accounts: Account information operations.
+        auth: Account authentication and the sessions it produces.
+        accounts: Account discovery and information operations.
         symbols: Symbol lookup and search.
         trading: Order and position operations.
         market_data: Market data subscriptions and historical data.
         protocol: Low-level protocol access for advanced usage.
     """
 
-    def __init__(self, config: ClientConfig, *, _clock: Clock | None = None) -> None:
-        """Initialize the client.
+    def __init__(
+        self,
+        config: ClientConfig,
+        *,
+        token_store: TokenStore | None = None,
+    ) -> None:
+        """Initialize the client with the default object graph.
 
         Args:
             config: Client configuration including credentials and settings.
-
-        The leading-underscore ``_clock`` parameter is an internal test seam for
-        injecting a deterministic time source into the heartbeat and token-refresh
-        timers. It defaults to a monotonic clock backed by real time and is not
-        part of the public API.
+            token_store: Durable storage for credentials. The client writes
+                through it whenever tokens rotate, but never reads it back;
+                loading the stored pair at startup is the caller's job. Without
+                one, refreshed tokens live only in memory.
         """
-        self._config = config
+        self._adopt(build_graph(config, token_store=token_store))
 
-        # Connection layer
-        self._transport = Transport(
-            host=config.host,
-            port=config.port,
-            use_ssl=config.use_ssl,
-        )
-        self._protocol = Protocol(
-            transport=self._transport,
-            reconnect_attempts=config.reconnect_attempts,
-            reconnect_min_wait=config.reconnect_min_wait,
-            reconnect_max_wait=config.reconnect_max_wait,
-        )
-        self._heartbeat = HeartbeatManager(
-            protocol=self._protocol,
-            interval=config.heartbeat_interval,
-            timeout=config.heartbeat_timeout,
-            clock=_clock,
-        )
+    @classmethod
+    def from_graph(cls, graph: ClientGraph) -> CTraderClient:
+        """Build a client around a graph assembled by the caller.
 
-        # Event system
-        self._emitter = EventEmitter()
-        self._router = EventRouter(
-            protocol=self._protocol,
-            emitter=self._emitter,
-        )
+        For substituting a collaborator the default assembly does not expose,
+        such as a deterministic clock.
 
-        # Auth manager
-        self._auth = AuthManager(
-            protocol=self._protocol,
-            client_id=config.client_id,
-            client_secret=config.client_secret,
-            refresh_policy=config.refresh_policy,
-            reauth_policy=config.reauth_policy,
-            clock=_clock,
-            on_account_ready=self._emit_ready_event,
-            on_refresh_failed=self._emit_refresh_failed_event,
-        )
+        Args:
+            graph: The collaborators the client should run on.
 
-        # API namespaces
-        self._accounts = AccountsAPI(
-            protocol=self._protocol,
-            default_timeout=config.request_timeout,
-        )
-        self._symbols = SymbolsAPI(
-            protocol=self._protocol,
-            default_timeout=config.request_timeout,
-        )
-        self._trading = TradingAPI(
-            protocol=self._protocol,
-            default_timeout=config.request_timeout,
-        )
-        self._market_data = MarketDataAPI(
-            protocol=self._protocol,
-            default_timeout=config.request_timeout,
-        )
+        Returns:
+            A client driving that graph.
+        """
+        client = cls.__new__(cls)
+        client._adopt(graph)
+        return client
 
-        self._connected = False
+    def _adopt(self, graph: ClientGraph) -> None:
+        """Take ownership of a graph."""
+        self._protocol = graph.protocol
+        self._supervisor = graph.supervisor
+        self._emitter = graph.emitter
+        self._router = graph.router
+        self._auth = graph.auth
+        self._refresher = graph.refresher
+        self._recovery = graph.recovery
+        self._accounts = graph.accounts
+        self._symbols = graph.symbols
+        self._trading = graph.trading
+        self._market_data = graph.market_data
 
-        # Set up reconnection handler
-        self._protocol.set_reconnect_handler(self._handle_reconnect)
-        self._protocol.set_disconnect_handler(self._handle_disconnect)
-
-        # Recover accounts dropped by a server-side disconnect
-        self._emitter.subscribe(AccountDisconnectEvent, self._handle_account_disconnect)
+        self._running: AbstractAsyncContextManager[None] | None = None
 
     # -------------------------------------------------------------------------
     # Properties
@@ -196,11 +191,9 @@ class CTraderClient:
     def auth(self) -> AuthManager:
         """Authentication operations.
 
-        Provides methods for:
-        - Application authentication
-        - Account authentication
-        - Token refresh management
-        - Account discovery
+        The application is authenticated as the client connects, so what is
+        left here is authenticating trading accounts and asking after the
+        sessions they hold.
         """
         return self._auth
 
@@ -208,7 +201,8 @@ class CTraderClient:
     def accounts(self) -> AccountsAPI:
         """Account information operations.
 
-        Provides methods to retrieve account/trader details.
+        Provides methods to discover the accounts an access token covers and to
+        retrieve account/trader details.
         """
         return self._accounts
 
@@ -248,7 +242,7 @@ class CTraderClient:
     @property
     def is_connected(self) -> bool:
         """Whether the client is connected to the server (transport level)."""
-        return self._connected and self._transport.is_connected
+        return self._supervisor.is_connected
 
     def is_account_authorized(self, account_id: int) -> bool:
         """Whether the account currently has a live, authorized session.
@@ -275,170 +269,78 @@ class CTraderClient:
     # Lifecycle
     # -------------------------------------------------------------------------
 
-    async def connect(self) -> None:
-        """Connect to the cTrader server.
+    @asynccontextmanager
+    async def _lifecycle(self) -> AsyncIterator[None]:
+        """Hold the connection and its background tasks open for the block.
 
-        Establishes the TCP/SSL connection, starts the protocol reader,
-        heartbeat monitor, and event router.
-
-        Raises:
-            CTraderConnectionFailedError: If connection cannot be established.
+        The connection layer is brought up by the supervisor, which owns the
+        order it has to happen in. What is left here runs inside that: the
+        application authentication that everything else depends on, and a task
+        group scoped to this generator rather than handed out to the
+        components, so a background loop that dies is raised here instead of
+        being discovered at shutdown.
         """
-        if self._connected:
-            return
-
-        logger.debug("Connecting to %s:%d", self._config.host, self._config.port)
-
-        await self._transport.connect()
-        await self._protocol.start()
-        await self._heartbeat.start()
-        await self._auth.start()
-        self._router.start()
-
-        self._connected = True
-        logger.info("Connected to cTrader server at %s:%d", self._config.host, self._config.port)
-
-    async def close(self) -> None:
-        """Close the connection and clean up resources.
-
-        Stops the event router, heartbeat monitor, protocol reader,
-        and closes the transport.
-        """
-        if not self._connected:
-            return
-
-        logger.debug("Closing connection")
-
-        self._router.stop()
-        await self._auth.stop()
-        await self._heartbeat.stop()
-        await self._protocol.stop()
-        await self._transport.close()
-
-        self._connected = False
-        logger.debug("Connection closed")
-
-    async def _emit_ready_event(self, account_id: int, trigger: AuthTrigger) -> None:
-        """Emit ReadyEvent when an account is authenticated.
-
-        Called by AuthManager after successful account authentication. Emitted
-        for every authentication that (re)establishes a server-side session and
-        therefore requires subscriptions to be (re)applied: INITIAL, RECONNECT,
-        and ACCOUNT_REAUTH. Suppressed for TOKEN_REFRESH, where the session and
-        its subscriptions remain intact.
-
-        Args:
-            account_id: The authenticated account ID.
-            trigger: Why the authentication occurred.
-        """
-        if trigger is AuthTrigger.TOKEN_REFRESH:
-            return
-
-        is_reconnect = trigger in (AuthTrigger.RECONNECT, AuthTrigger.ACCOUNT_REAUTH)
-        await self._emitter.emit(ReadyEvent(account_id=account_id, is_reconnect=is_reconnect))
-
-    async def _emit_refresh_failed_event(self, account_id: int, error: TokenRefreshError) -> None:
-        """Emit TokenRefreshFailedEvent when a token refresh exhausts its retries.
-
-        Called by AuthManager, which keeps the existing credentials and retries
-        on the next check interval. A repeating event means the refresh token is
-        no longer usable and the account must be re-authorized out of band.
-
-        Args:
-            account_id: The account whose token could not be refreshed.
-            error: The refresh failure, including its underlying cause.
-        """
-        await self._emitter.emit(TokenRefreshFailedEvent(account_id=account_id, error=error))
-
-    async def _handle_account_disconnect(self, event: AccountDisconnectEvent) -> None:
-        """Route a server-side account disconnect into recovery re-auth."""
-        self._auth.handle_account_disconnect(event.account_id)
-
-    async def _handle_reconnect(self) -> None:
-        """Handle automatic reconnection by re-authenticating.
-
-        Called by Protocol after successful reconnection. Re-authenticates
-        the app and all previously authenticated accounts, then emits
-        a ReconnectedEvent so users can restore subscriptions.
-        """
-        logger.debug("Connection restored, re-authenticating...")
-
-        # Restart heartbeat monitoring
-        await self._heartbeat.restart()
-
-        restored: list[int] = []
-        failed: list[tuple[int, str]] = []
-
-        # Re-authenticate app
-        try:
+        async with self._supervisor.serving():
             await self._auth.authenticate_app()
-            app_auth_restored = True
-            logger.debug("App re-authenticated successfully")
-        except Exception as e:
-            logger.error("Failed to re-authenticate app after reconnect: %s", e)
-            app_auth_restored = False
-            # Emit event with failure - user must handle this
-            await self._emitter.emit(
-                ReconnectedEvent(
-                    app_auth_restored=False,
-                    restored_accounts=(),
-                    failed_accounts=(),
-                )
-            )
-            return
-
-        # Re-authenticate all previously authenticated accounts
-        for credentials in self._auth.all_credentials():
-            account_id = credentials.account_id
-            try:
-                await self._auth.authenticate_account(credentials, trigger=AuthTrigger.RECONNECT)
-                restored.append(account_id)
-                logger.debug("Re-authenticated account %d", account_id)
-            except Exception as e:
-                logger.error("Failed to re-authenticate account %d: %s", account_id, e)
-                failed.append((account_id, str(e)))
-
-        # Emit event for user to handle subscriptions
-        await self._emitter.emit(
-            ReconnectedEvent(
-                app_auth_restored=app_auth_restored,
-                restored_accounts=tuple(restored),
-                failed_accounts=tuple(failed),
-            )
-        )
-
-    async def _handle_disconnect(self) -> None:
-        """Discard the state that died with the connection.
-
-        Account sessions live on the server side of the link, so a dropped link
-        means they are gone. Forgetting them here keeps `is_account_authorized`
-        honest while the client is offline; the credentials are kept so the
-        reconnect handler can re-establish the sessions.
-        """
-        self._auth.handle_connection_lost()
+            async with anyio.create_task_group() as task_group:
+                await task_group.start(self._refresher.serve)
+                await task_group.start(self._recovery.serve)
+                self._router.start()
+                try:
+                    yield
+                finally:
+                    logger.debug("Closing connection")
+                    self._router.stop()
+                    await self._recovery.stop()
+                    await self._refresher.stop()
 
     async def __aenter__(self) -> CTraderClient:
-        """Async context manager entry.
-
-        Connects to the server automatically.
+        """Connect and authenticate the application for the life of the block.
 
         Returns:
             The client instance.
+
+        Raises:
+            CTraderConnectionFailedError: If connection cannot be established.
+            ApplicationAuthError: If the server rejects the application credentials.
         """
-        await self.connect()
+        if self._running is not None:
+            raise RuntimeError("Client is already connected")
+
+        running = self._lifecycle()
+        try:
+            await running.__aenter__()
+        except BaseExceptionGroup as group:
+            failure = _sole_failure(group)
+            if failure is group:
+                raise
+            raise failure from failure.__cause__
+
+        self._running = running
         return self
 
     async def __aexit__(
         self,
-        _exc_type: type[BaseException] | None,
-        _exc_val: BaseException | None,
-        _exc_tb: Any,
-    ) -> None:
-        """Async context manager exit.
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> bool | None:
+        """Wind down the background tasks and close the connection."""
+        running, self._running = self._running, None
+        if running is None:
+            return None
 
-        Closes the connection automatically.
-        """
-        await self.close()
+        try:
+            return await running.__aexit__(exc_type, exc_val, exc_tb)
+        except BaseExceptionGroup as group:
+            failure = _sole_failure(group)
+            if failure is exc_val:
+                # The block's own exception, carried out through the task
+                # group. Let it propagate as itself rather than re-raising it.
+                return False
+            if failure is group:
+                raise
+            raise failure from failure.__cause__
 
     # -------------------------------------------------------------------------
     # Event Registration

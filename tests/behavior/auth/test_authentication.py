@@ -9,19 +9,18 @@ import pytest
 from ctrader_api_client._internal.proto import (
     ProtoOAAccountAuthReq,
     ProtoOAApplicationAuthReq,
-    ProtoOAApplicationAuthRes,
-    ProtoOAGetAccountListByAccessTokenReq,
 )
-from ctrader_api_client.auth import AuthManager, AuthTrigger
+from ctrader_api_client.auth import AuthManager
+from ctrader_api_client.enums import AuthTrigger
+from ctrader_api_client.events import ReadyEvent
 from ctrader_api_client.exceptions import (
     AccountAuthError,
-    AccountNotFoundError,
     APIError,
     ApplicationAuthError,
     TokenExpiredError,
 )
 
-from ...harness import FailingRecorder, Recorder, StubProtocol, factories
+from ...harness import RecordingPublisher, RecordingRestorer, StubProtocol, factories
 
 
 async def test_the_application_reports_itself_authenticated(auth: AuthManager, protocol: StubProtocol) -> None:
@@ -78,7 +77,7 @@ async def test_an_unexpected_reply_to_application_auth_is_an_error(
 async def test_an_authenticated_account_becomes_authorized(auth: AuthManager, protocol: StubProtocol) -> None:
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
-    await auth.authenticate_account(factories.credentials())
+    await auth.authenticate_trader(factories.credentials())
 
     assert auth.is_account_authorized(factories.ACCOUNT_ID)
     assert auth.authorized_accounts == [factories.ACCOUNT_ID]
@@ -88,7 +87,7 @@ async def test_an_authenticated_account_becomes_authorized(auth: AuthManager, pr
 async def test_account_auth_sends_the_account_id_and_token(auth: AuthManager, protocol: StubProtocol) -> None:
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
-    await auth.authenticate_account(factories.credentials())
+    await auth.authenticate_trader(factories.credentials())
 
     request = protocol.only_sent(ProtoOAAccountAuthReq)
     assert request.ctid_trader_account_id == factories.ACCOUNT_ID
@@ -99,7 +98,7 @@ async def test_credentials_are_kept_for_later_use(auth: AuthManager, protocol: S
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
     credentials = factories.credentials()
 
-    await auth.authenticate_account(credentials)
+    await auth.authenticate_trader(credentials)
 
     assert auth.get_credentials(factories.ACCOUNT_ID) == credentials
 
@@ -119,7 +118,7 @@ async def test_a_failed_account_auth_leaves_the_account_unauthorized(
     )
 
     with pytest.raises(AccountAuthError) as exc_info:
-        await auth.authenticate_account(factories.credentials())
+        await auth.authenticate_trader(factories.credentials())
 
     assert exc_info.value.error_code == "ACCOUNT_NOT_AUTHORIZED"
     assert exc_info.value.ctid_trader_account_id == factories.ACCOUNT_ID
@@ -134,7 +133,7 @@ async def test_an_unexpected_reply_to_account_auth_is_an_error(
     protocol.respond(ProtoOAAccountAuthReq, factories.app_auth_res())
 
     with pytest.raises(AccountAuthError) as exc_info:
-        await auth.authenticate_account(factories.credentials())
+        await auth.authenticate_trader(factories.credentials())
 
     assert exc_info.value.error_code == "UNEXPECTED_RESPONSE"
     assert not auth.is_account_authorized(factories.ACCOUNT_ID)
@@ -150,7 +149,7 @@ async def test_a_rejected_token_is_reported_as_expired(
     protocol.respond(ProtoOAAccountAuthReq, APIError(error_code=error_code))
 
     with pytest.raises(TokenExpiredError) as exc_info:
-        await auth.authenticate_account(factories.credentials())
+        await auth.authenticate_trader(factories.credentials())
 
     assert exc_info.value.ctid_trader_account_id == factories.ACCOUNT_ID
     assert not auth.is_account_authorized(factories.ACCOUNT_ID)
@@ -163,192 +162,103 @@ async def test_an_already_expired_token_is_not_sent_to_the_server(
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
     with pytest.raises(TokenExpiredError):
-        await auth.authenticate_account(factories.credentials(expires_in=-1.0))
+        await auth.authenticate_trader(factories.credentials(expires_in=-1.0))
 
     assert protocol.sent_of(ProtoOAAccountAuthReq) == []
     assert not auth.is_account_authorized(factories.ACCOUNT_ID)
 
 
 async def test_an_authenticated_account_announces_itself(
-    make_auth: Callable[..., AuthManager],
+    auth: AuthManager,
     protocol: StubProtocol,
+    publisher: RecordingPublisher,
 ) -> None:
-    ready: Recorder[tuple[int, AuthTrigger]] = Recorder()
-    auth = make_auth(on_account_ready=ready)
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
-    await auth.authenticate_account(factories.credentials())
+    await auth.authenticate_trader(factories.credentials())
 
-    assert ready.only == (factories.ACCOUNT_ID, AuthTrigger.INITIAL)
+    assert publisher.only_of(ReadyEvent) == ReadyEvent(factories.ACCOUNT_ID, AuthTrigger.INITIAL)
 
 
 async def test_the_reason_for_authentication_is_reported(
-    make_auth: Callable[..., AuthManager],
+    auth: AuthManager,
     protocol: StubProtocol,
+    publisher: RecordingPublisher,
 ) -> None:
     """Subscription restoration depends on knowing why the account came up."""
-    ready: Recorder[tuple[int, AuthTrigger]] = Recorder()
-    auth = make_auth(on_account_ready=ready)
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
-    await auth.authenticate_account(factories.credentials(), trigger=AuthTrigger.RECONNECT)
+    await auth.establish(factories.credentials(), AuthTrigger.RECONNECT)
 
-    assert ready.only == (factories.ACCOUNT_ID, AuthTrigger.RECONNECT)
+    assert publisher.only_of(ReadyEvent) == ReadyEvent(factories.ACCOUNT_ID, AuthTrigger.RECONNECT)
 
 
-async def test_a_failing_ready_callback_does_not_fail_the_authentication(
+async def test_a_session_is_restored_before_the_account_is_announced(
+    make_auth: Callable[..., AuthManager],
+    protocol: StubProtocol,
+    publisher: RecordingPublisher,
+) -> None:
+    """A ready handler must not race a half-restored feed."""
+    announced_when_restoring: list[int] = []
+    restorer = RecordingRestorer(before_each=lambda: announced_when_restoring.append(len(publisher.of(ReadyEvent))))
+    auth = make_auth(restorer=restorer)
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+
+    await auth.establish(factories.credentials(), AuthTrigger.RECONNECT)
+
+    assert restorer.restored == [factories.ACCOUNT_ID]
+    assert announced_when_restoring == [0]
+
+
+async def test_a_token_refresh_does_not_restore_the_session(
     make_auth: Callable[..., AuthManager],
     protocol: StubProtocol,
 ) -> None:
-    ready: FailingRecorder[tuple[int, AuthTrigger]] = FailingRecorder()
-    auth = make_auth(on_account_ready=ready)
+    """The session is renewed in place, so its subscriptions are still live."""
+    restorer = RecordingRestorer()
+    auth = make_auth(restorer=restorer)
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
-    await auth.authenticate_account(factories.credentials())
+    await auth.establish(factories.credentials(), AuthTrigger.TOKEN_REFRESH)
 
-    assert auth.is_account_authorized(factories.ACCOUNT_ID)
-
-
-async def test_accounts_are_listed_for_an_access_token(auth: AuthManager, protocol: StubProtocol) -> None:
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        factories.account_list_res(
-            factories.ctid_account(account_id=1, trader_login=111),
-            factories.ctid_account(account_id=2, trader_login=222),
-        ),
-    )
-
-    accounts = await auth.get_accounts(factories.ACCESS_TOKEN)
-
-    assert [account.account_id for account in accounts] == [1, 2]
-    assert [account.trader_login for account in accounts] == [111, 222]
-
-
-async def test_a_trader_login_resolves_to_its_account_id(auth: AuthManager, protocol: StubProtocol) -> None:
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        factories.account_list_res(
-            factories.ctid_account(account_id=1, trader_login=111),
-            factories.ctid_account(account_id=2, trader_login=222),
-        ),
-    )
-
-    account_id = await auth.resolve_account_id(factories.ACCESS_TOKEN, trader_login=222)
-
-    assert account_id == 2
-
-
-async def test_an_unknown_trader_login_reports_what_is_available(
-    auth: AuthManager,
-    protocol: StubProtocol,
-) -> None:
-    """The caller most likely typed the wrong login, so name the ones that exist."""
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        factories.account_list_res(
-            factories.ctid_account(account_id=1, trader_login=111),
-            factories.ctid_account(account_id=2, trader_login=222),
-        ),
-    )
-
-    with pytest.raises(AccountNotFoundError) as exc_info:
-        await auth.resolve_account_id(factories.ACCESS_TOKEN, trader_login=999)
-
-    assert exc_info.value.trader_login == 999
-    assert exc_info.value.available_logins == [111, 222]
-    assert "111" in str(exc_info.value)
-
-
-async def test_authenticating_by_trader_login_returns_usable_credentials(
-    auth: AuthManager,
-    protocol: StubProtocol,
-) -> None:
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        factories.account_list_res(factories.ctid_account(account_id=777, trader_login=222)),
-    )
-    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res(account_id=777))
-
-    credentials = await auth.authenticate_by_trader_login(
-        trader_login=222,
-        access_token=factories.ACCESS_TOKEN,
-        refresh_token=factories.REFRESH_TOKEN,
-        expires_at=1_900_000_000.0,
-    )
-
-    assert credentials.account_id == 777
-    assert auth.is_account_authorized(777)
-
-
-async def test_authenticating_by_an_unknown_login_sends_no_account_auth(
-    auth: AuthManager,
-    protocol: StubProtocol,
-) -> None:
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        factories.account_list_res(factories.ctid_account(account_id=1, trader_login=111)),
-    )
-
-    with pytest.raises(AccountNotFoundError):
-        await auth.authenticate_by_trader_login(
-            trader_login=999,
-            access_token=factories.ACCESS_TOKEN,
-            refresh_token=factories.REFRESH_TOKEN,
-            expires_at=1_900_000_000.0,
-        )
-
-    assert protocol.sent_of(ProtoOAAccountAuthReq) == []
-
-
-async def test_an_unexpected_reply_to_the_account_list_is_an_error(
-    auth: AuthManager,
-    protocol: StubProtocol,
-) -> None:
-    protocol.respond(ProtoOAGetAccountListByAccessTokenReq, ProtoOAApplicationAuthRes())
-
-    with pytest.raises(APIError) as exc_info:
-        await auth.get_accounts(factories.ACCESS_TOKEN)
-
-    assert exc_info.value.error_code == "UNEXPECTED_RESPONSE"
-
-
-async def test_listing_accounts_with_a_dead_token_reports_it_as_expired(
-    auth: AuthManager,
-    protocol: StubProtocol,
-) -> None:
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        APIError(error_code="CH_ACCESS_TOKEN_INVALID"),
-    )
-
-    with pytest.raises(TokenExpiredError):
-        await auth.get_accounts(factories.ACCESS_TOKEN)
-
-
-async def test_listing_accounts_surfaces_other_failures_unchanged(
-    auth: AuthManager,
-    protocol: StubProtocol,
-) -> None:
-    protocol.respond(
-        ProtoOAGetAccountListByAccessTokenReq,
-        APIError(error_code="CH_OA_CLIENT_NOT_FOUND"),
-    )
-
-    with pytest.raises(APIError) as exc_info:
-        await auth.get_accounts(factories.ACCESS_TOKEN)
-
-    assert exc_info.value.error_code == "CH_OA_CLIENT_NOT_FOUND"
+    assert restorer.restored == []
 
 
 async def test_a_removed_account_is_forgotten(auth: AuthManager, protocol: StubProtocol) -> None:
     protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
-    await auth.authenticate_account(factories.credentials())
+    await auth.authenticate_trader(factories.credentials())
 
     removed = auth.remove_account(factories.ACCOUNT_ID)
 
     assert removed is True
     assert auth.authenticated_accounts == []
     assert not auth.is_account_authorized(factories.ACCOUNT_ID)
+
+
+async def test_removing_an_account_discards_what_was_held_for_restoration(
+    make_auth: Callable[..., AuthManager],
+    protocol: StubProtocol,
+) -> None:
+    """State kept for a session nobody will re-establish is state nobody wants."""
+    restorer = RecordingRestorer()
+    auth = make_auth(restorer=restorer)
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+    await auth.authenticate_trader(factories.credentials())
+
+    auth.remove_account(factories.ACCOUNT_ID)
+
+    assert restorer.forgotten == [factories.ACCOUNT_ID]
+
+
+async def test_removing_an_unknown_account_holds_on_to_nothing(
+    make_auth: Callable[..., AuthManager],
+) -> None:
+    """Nothing was removed, so there is nothing to discard on its behalf."""
+    restorer = RecordingRestorer()
+    auth = make_auth(restorer=restorer)
+
+    assert auth.remove_account(factories.ACCOUNT_ID) is False
+    assert restorer.forgotten == []
 
 
 async def test_removing_an_unknown_account_reports_nothing_was_removed(auth: AuthManager) -> None:

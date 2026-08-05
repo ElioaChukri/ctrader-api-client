@@ -6,7 +6,12 @@ import pytest
 
 from ctrader_api_client.api import AccountsAPI, MarketDataAPI, SymbolsAPI, TradingAPI
 
-from ...harness import StubProtocol
+from ...harness import RecordingPublisher, StubProtocol
+
+
+@pytest.fixture
+def publisher() -> RecordingPublisher:
+    return RecordingPublisher()
 
 
 @pytest.fixture
@@ -25,5 +30,5 @@ def trading(protocol: StubProtocol) -> TradingAPI:
 
 
 @pytest.fixture
-def market_data(protocol: StubProtocol) -> MarketDataAPI:
-    return MarketDataAPI(protocol=protocol)
+def market_data(protocol: StubProtocol, publisher: RecordingPublisher) -> MarketDataAPI:
+    return MarketDataAPI(protocol=protocol, publisher=publisher)

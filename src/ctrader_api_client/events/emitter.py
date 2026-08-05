@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=Event)
 EventHandler = Callable[[Any], Awaitable[None]]
-ErrorHandler = Callable[[Event, EventHandler, Exception], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,19 +50,9 @@ class EventEmitter:
         ```
     """
 
-    def __init__(
-        self,
-        on_handler_error: ErrorHandler | None = None,
-    ) -> None:
-        """Initialize the event emitter.
-
-        Args:
-            on_handler_error: Optional async callback invoked when a handler
-                raises an exception. Receives the event, handler, and exception.
-                Called after logging the error.
-        """
+    def __init__(self) -> None:
+        """Initialize the event emitter."""
         self._subscriptions: dict[type[Event], list[Subscription]] = {}
-        self._on_handler_error = on_handler_error
 
     def subscribe(
         self,
@@ -213,15 +202,6 @@ class EventEmitter:
                 type(event).__name__,
                 e,
             )
-            if self._on_handler_error is not None:
-                try:
-                    await self._on_handler_error(event, sub.handler, e)
-                except Exception as callback_error:
-                    logger.error(
-                        "Error callback raised %s: %s",
-                        type(callback_error).__name__,
-                        callback_error,
-                    )
 
     @staticmethod
     def _validate_filter(event_type: type, field_name: str) -> None:

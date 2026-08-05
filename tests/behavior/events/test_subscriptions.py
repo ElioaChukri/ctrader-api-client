@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -17,7 +16,6 @@ from ctrader_api_client.events import (
     ReadyEvent,
     SpotEvent,
 )
-from ctrader_api_client.events.emitter import EventHandler
 
 from ...harness import FailingRecorder, Recorder, factories
 
@@ -253,51 +251,6 @@ async def test_a_failing_handler_does_not_break_the_emitter(emitter: EventEmitte
     await emitter.emit(spot())
 
     assert failing.count == 2
-
-
-async def test_a_handler_failure_is_reported_with_its_context(
-    make_emitter: Callable[..., EventEmitter],
-) -> None:
-    errors: Recorder[tuple[Event, EventHandler, Exception]] = Recorder()
-    emitter = make_emitter(on_handler_error=errors)
-    failing: FailingRecorder[SpotEvent] = FailingRecorder()
-    emitter.subscribe(SpotEvent, failing)
-
-    event = spot()
-    await emitter.emit(event)
-
-    failed_event, handler, error = errors.only
-    assert failed_event is event
-    assert handler is failing
-    assert isinstance(error, RuntimeError)
-
-
-async def test_a_failing_error_report_does_not_break_the_emitter(
-    make_emitter: Callable[..., EventEmitter],
-) -> None:
-    errors: FailingRecorder[tuple[Event, EventHandler, Exception]] = FailingRecorder()
-    emitter = make_emitter(on_handler_error=errors)
-    failing: FailingRecorder[SpotEvent] = FailingRecorder()
-    healthy: Recorder[SpotEvent] = Recorder()
-    emitter.subscribe(SpotEvent, failing)
-    emitter.subscribe(SpotEvent, healthy)
-
-    await emitter.emit(spot())
-
-    assert healthy.count == 1
-
-
-async def test_a_successful_handler_is_not_reported_as_an_error(
-    make_emitter: Callable[..., EventEmitter],
-) -> None:
-    errors: Recorder[tuple[Event, EventHandler, Exception]] = Recorder()
-    emitter = make_emitter(on_handler_error=errors)
-    healthy: Recorder[SpotEvent] = Recorder()
-    emitter.subscribe(SpotEvent, healthy)
-
-    await emitter.emit(spot())
-
-    assert errors.count == 0
 
 
 async def test_subscriptions_are_counted_per_type(emitter: EventEmitter) -> None:

@@ -28,8 +28,7 @@ pip install ctrader-api-client
 
 ```python
 import asyncio
-from ctrader_api_client import CTraderClient, ClientConfig
-from ctrader_api_client.events import ReadyEvent, SpotEvent
+from ctrader_api_client import AccountCredentials, ClientConfig, CTraderClient, SpotEvent
 
 config = ClientConfig(
     client_id="your_client_id",
@@ -45,21 +44,23 @@ async def on_price(event: SpotEvent):
     print(f"Price update: {event.bid}/{event.ask}")
 
 
-@client.on(ReadyEvent)
-async def on_ready(event: ReadyEvent):
-    """Called when account is authenticated and ready."""
-    await client.market_data.subscribe_spots(event.account_id, [270])
-
-
 async def main():
     async with client:
-        await client.auth.authenticate_app()
-        await client.auth.authenticate_by_trader_login(
+        account_id = await client.accounts.resolve_account_id(
+            "your_access_token",
             trader_login=12345678,
-            access_token="your_access_token",
-            refresh_token="your_refresh_token",
-            expires_at=1778617423,
         )
+        await client.auth.authenticate_trader(
+            AccountCredentials(
+                account_id=account_id,
+                access_token="your_access_token",
+                refresh_token="your_refresh_token",
+                expires_at=1778617423,
+            )
+        )
+
+        # Subscribe once. The client re-applies this after any reconnection.
+        await client.market_data.subscribe_spots(account_id, [270])
 
         # Keep running to receive events
         await asyncio.Event().wait()

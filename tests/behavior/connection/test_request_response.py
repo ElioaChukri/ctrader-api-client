@@ -11,7 +11,6 @@ import pytest
 from ctrader_api_client import CTraderClient
 from ctrader_api_client._internal.proto import (
     ProtoOAApplicationAuthReq,
-    ProtoOAApplicationAuthRes,
     ProtoOATraderReq,
     ProtoOATraderRes,
 )
@@ -21,16 +20,17 @@ from ...harness import FakeServer, factories
 
 
 async def test_response_is_returned_to_the_caller(client: CTraderClient, server: FakeServer) -> None:
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
+    server.respond(ProtoOATraderReq, ProtoOATraderRes(ctid_trader_account_id=factories.ACCOUNT_ID))
 
-    response = await client.auth.authenticate_app()
+    response = await client.protocol.request(
+        ProtoOATraderReq(ctid_trader_account_id=factories.ACCOUNT_ID),
+        ProtoOATraderRes,
+    )
 
-    assert isinstance(response, ProtoOAApplicationAuthRes)
+    assert response.ctid_trader_account_id == factories.ACCOUNT_ID
 
 
 async def test_request_carries_the_configured_credentials(client: CTraderClient, server: FakeServer) -> None:
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
-
     await client.auth.authenticate_app()
 
     request = server.requests_of(ProtoOAApplicationAuthReq)[0]
@@ -39,7 +39,6 @@ async def test_request_carries_the_configured_credentials(client: CTraderClient,
 
 async def test_concurrent_requests_receive_their_own_responses(client: CTraderClient, server: FakeServer) -> None:
     """Responses are matched by correlation id, not by arrival order."""
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
     server.on(
         ProtoOATraderReq,
         lambda request: ProtoOATraderRes(ctid_trader_account_id=request.ctid_trader_account_id),
@@ -77,7 +76,8 @@ async def test_out_of_order_responses_still_reach_the_right_caller(
         await server.wait_for_request(ProtoOATraderReq, count=2)
 
         # Answer in the reverse of the order the requests arrived.
-        for entry in reversed(server.entries):
+        pending = [entry for entry in server.entries if isinstance(entry.message, ProtoOATraderReq)]
+        for entry in reversed(pending):
             assert isinstance(entry.message, ProtoOATraderReq)
             await server.push(
                 ProtoOATraderRes(ctid_trader_account_id=entry.message.ctid_trader_account_id),

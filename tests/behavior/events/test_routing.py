@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import betterproto
 import pytest
 
+from ctrader_api_client._internal import proto
 from ctrader_api_client._internal.proto import (
     ProtoOAAccountDisconnectEvent,
     ProtoOAAccountsTokenInvalidatedEvent,
@@ -39,6 +42,7 @@ from ctrader_api_client.events import (
     ClientDisconnectEvent,
     DepthEvent,
     EventEmitter,
+    EventRouter,
     ExecutionEvent,
     MarginCallTriggerEvent,
     MarginChangeEvent,
@@ -50,7 +54,7 @@ from ctrader_api_client.events import (
     TrailingStopChangedEvent,
 )
 
-from ...harness import Recorder, StubProtocol, factories
+from ...harness import Recorder, RecordingRecovery, StubProtocol, factories
 
 
 TIMESTAMP_MS = 1_700_000_000_000
@@ -550,6 +554,17 @@ async def test_an_account_disconnect_names_the_account(
     assert received.only.account_id == factories.ACCOUNT_ID
 
 
+@pytest.mark.usefixtures("routing")
+async def test_an_account_disconnect_reaches_recovery_without_the_bus(
+    protocol: StubProtocol,
+    recovery: RecordingRecovery,
+) -> None:
+    """Restoring the session must not hinge on a consumer having subscribed."""
+    await protocol.emit(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
+
+    assert recovery.disconnected == [factories.ACCOUNT_ID]
+
+
 async def test_a_symbol_change_lists_the_changed_symbols(
     routing: EventEmitter,
     protocol: StubProtocol,
@@ -618,5 +633,65 @@ async def test_an_unrouted_message_reaches_nobody(routing: EventEmitter, protoco
     routing.subscribe(SpotEvent, received)
 
     await protocol.emit(ProtoOAClientDisconnectEvent(reason="Maintenance"))
+
+    assert received.count == 0
+
+
+# Server-push messages the router deliberately leaves alone. Anything else the
+# API gains must be routed, or added here with a reason.
+UNROUTED = {
+    # Owned by HeartbeatManager, which tracks liveness rather than converting.
+    "ProtoHeartbeatEvent",
+    # Margin call threshold configuration changed; no public event yet.
+    "ProtoOAMarginCallUpdateEvent",
+}
+
+
+class RecordingProtocol(StubProtocol):
+    """A protocol that remembers which message types were registered against it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.registered: list[type[betterproto.Message]] = []
+
+    def on_event[M: betterproto.Message](
+        self,
+        message_type: type[M],
+        handler: Callable[[M], Awaitable[None]],
+    ) -> Callable[[], None]:
+        self.registered.append(message_type)
+        return super().on_event(message_type, handler)
+
+
+def test_every_server_event_is_routed_or_explicitly_unrouted(
+    emitter: EventEmitter,
+    recovery: RecordingRecovery,
+) -> None:
+    protocol = RecordingProtocol()
+    EventRouter(protocol=protocol, emitter=emitter, recovery=recovery).start()
+
+    declared = {
+        name
+        for name, member in vars(proto).items()
+        if isinstance(member, type) and issubclass(member, betterproto.Message) and name.endswith("Event")
+    }
+    routed = {message_type.__name__ for message_type in protocol.registered}
+
+    assert declared - routed - UNROUTED == set()
+
+
+async def test_a_stopped_router_converts_nothing(
+    protocol: StubProtocol,
+    emitter: EventEmitter,
+    recovery: RecordingRecovery,
+) -> None:
+    """Handlers outliving stop() would keep converting for a router nobody runs."""
+    router = EventRouter(protocol=protocol, emitter=emitter, recovery=recovery)
+    received: Recorder[SpotEvent] = Recorder()
+    emitter.subscribe(SpotEvent, received)
+
+    router.start()
+    router.stop()
+    await protocol.emit(factories.spot_event())
 
     assert received.count == 0

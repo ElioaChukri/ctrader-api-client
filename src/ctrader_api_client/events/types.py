@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from ..enums import ExecutionType, OrderSide
+from ..enums import AuthTrigger, ExecutionType, OrderSide
 from ..exceptions import TokenRefreshError
 from ..models import Trendbar
 
@@ -201,6 +201,27 @@ class TokenRefreshFailedEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class SubscriptionRestoreFailedEvent:
+    """Subscription restore failed event.
+
+    Emitted when standing market data subscriptions could not be re-applied
+    after a session was re-established. Restoration stops at the first failure,
+    so subscriptions after it in the sequence are also missing.
+
+    The intent is kept, so the next reconnection tries again. Until then the
+    account receives no data for the affected symbols, and a consumer that
+    needs it sooner should re-subscribe from a handler.
+
+    Attributes:
+        account_id: The cTID trader account ID.
+        error: The failure that stopped restoration.
+    """
+
+    account_id: int
+    error: Exception
+
+
+@dataclass(frozen=True, slots=True)
 class ClientDisconnectEvent:
     """Client disconnect event.
 
@@ -320,12 +341,16 @@ class ReadyEvent:
 
     Attributes:
         account_id: The cTID trader account ID that is now ready.
-        is_reconnect: True if this follows a reconnection or account-disconnect
-            recovery, False for initial authentication.
+        trigger: Why the session was established. Never TOKEN_REFRESH.
     """
 
     account_id: int
-    is_reconnect: bool
+    trigger: AuthTrigger
+
+    @property
+    def is_reconnect(self) -> bool:
+        """True if this follows a reconnection or account-disconnect recovery."""
+        return self.trigger is not AuthTrigger.INITIAL
 
 
 # Type alias for any event type
@@ -338,6 +363,7 @@ type Event = (
     | DepthEvent
     | TokenInvalidatedEvent
     | TokenRefreshFailedEvent
+    | SubscriptionRestoreFailedEvent
     | ClientDisconnectEvent
     | AccountDisconnectEvent
     | SymbolChangedEvent

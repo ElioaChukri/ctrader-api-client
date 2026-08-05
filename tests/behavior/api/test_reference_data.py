@@ -8,6 +8,7 @@ import pytest
 
 from ctrader_api_client._internal.proto import (
     ProtoOAApplicationAuthRes,
+    ProtoOAGetAccountListByAccessTokenReq,
     ProtoOALightSymbol,
     ProtoOASymbol,
     ProtoOASymbolByIdReq,
@@ -19,7 +20,7 @@ from ctrader_api_client._internal.proto import (
     ProtoOATraderRes,
 )
 from ctrader_api_client.api import AccountsAPI, SymbolsAPI
-from ctrader_api_client.exceptions import APIError
+from ctrader_api_client.exceptions import AccountNotFoundError, APIError, TokenExpiredError
 
 from ...harness import StubProtocol, factories
 
@@ -99,6 +100,104 @@ async def test_an_unexpected_account_reply_is_an_error(accounts: AccountsAPI, pr
         await accounts.get_trader(factories.ACCOUNT_ID)
 
     assert exc_info.value.error_code == "UNEXPECTED_RESPONSE"
+
+
+async def test_accounts_are_listed_for_an_access_token(accounts: AccountsAPI, protocol: StubProtocol) -> None:
+    protocol.respond(
+        ProtoOAGetAccountListByAccessTokenReq,
+        factories.account_list_res(
+            factories.ctid_account(account_id=1, trader_login=111),
+            factories.ctid_account(account_id=2, trader_login=222),
+        ),
+    )
+
+    listed = await accounts.list_by_token(factories.ACCESS_TOKEN)
+
+    assert [account.account_id for account in listed] == [1, 2]
+    assert [account.trader_login for account in listed] == [111, 222]
+
+
+async def test_the_account_list_request_carries_the_token(accounts: AccountsAPI, protocol: StubProtocol) -> None:
+    protocol.respond(ProtoOAGetAccountListByAccessTokenReq, factories.account_list_res())
+
+    await accounts.list_by_token(factories.ACCESS_TOKEN)
+
+    assert protocol.only_sent(ProtoOAGetAccountListByAccessTokenReq).access_token == factories.ACCESS_TOKEN
+
+
+async def test_a_trader_login_resolves_to_its_account_id(accounts: AccountsAPI, protocol: StubProtocol) -> None:
+    protocol.respond(
+        ProtoOAGetAccountListByAccessTokenReq,
+        factories.account_list_res(
+            factories.ctid_account(account_id=1, trader_login=111),
+            factories.ctid_account(account_id=2, trader_login=222),
+        ),
+    )
+
+    account_id = await accounts.resolve_account_id(factories.ACCESS_TOKEN, trader_login=222)
+
+    assert account_id == 2
+
+
+async def test_an_unknown_trader_login_reports_what_is_available(
+    accounts: AccountsAPI,
+    protocol: StubProtocol,
+) -> None:
+    """The caller most likely typed the wrong login, so name the ones that exist."""
+    protocol.respond(
+        ProtoOAGetAccountListByAccessTokenReq,
+        factories.account_list_res(
+            factories.ctid_account(account_id=1, trader_login=111),
+            factories.ctid_account(account_id=2, trader_login=222),
+        ),
+    )
+
+    with pytest.raises(AccountNotFoundError) as exc_info:
+        await accounts.resolve_account_id(factories.ACCESS_TOKEN, trader_login=999)
+
+    assert exc_info.value.trader_login == 999
+    assert exc_info.value.available_logins == [111, 222]
+    assert "111" in str(exc_info.value)
+
+
+async def test_an_unexpected_reply_to_the_account_list_is_an_error(
+    accounts: AccountsAPI,
+    protocol: StubProtocol,
+) -> None:
+    protocol.respond(ProtoOAGetAccountListByAccessTokenReq, ProtoOAApplicationAuthRes())
+
+    with pytest.raises(APIError) as exc_info:
+        await accounts.list_by_token(factories.ACCESS_TOKEN)
+
+    assert exc_info.value.error_code == "UNEXPECTED_RESPONSE"
+
+
+async def test_listing_accounts_with_a_dead_token_reports_it_as_expired(
+    accounts: AccountsAPI,
+    protocol: StubProtocol,
+) -> None:
+    protocol.respond(
+        ProtoOAGetAccountListByAccessTokenReq,
+        APIError(error_code="CH_ACCESS_TOKEN_INVALID"),
+    )
+
+    with pytest.raises(TokenExpiredError):
+        await accounts.list_by_token(factories.ACCESS_TOKEN)
+
+
+async def test_listing_accounts_surfaces_other_failures_unchanged(
+    accounts: AccountsAPI,
+    protocol: StubProtocol,
+) -> None:
+    protocol.respond(
+        ProtoOAGetAccountListByAccessTokenReq,
+        APIError(error_code="CH_OA_CLIENT_NOT_FOUND"),
+    )
+
+    with pytest.raises(APIError) as exc_info:
+        await accounts.list_by_token(factories.ACCESS_TOKEN)
+
+    assert exc_info.value.error_code == "CH_OA_CLIENT_NOT_FOUND"
 
 
 async def test_every_listed_symbol_is_returned(symbols: SymbolsAPI, protocol: StubProtocol) -> None:

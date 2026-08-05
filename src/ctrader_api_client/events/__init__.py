@@ -20,6 +20,7 @@ Example:
 """
 
 from .emitter import EventEmitter
+from .publisher import EventPublisher
 from .router import EventRouter
 from .types import (
     AccountDisconnectEvent,
@@ -34,6 +35,7 @@ from .types import (
     ReadyEvent,
     ReconnectedEvent,
     SpotEvent,
+    SubscriptionRestoreFailedEvent,
     SymbolChangedEvent,
     TokenInvalidatedEvent,
     TokenRefreshFailedEvent,
@@ -49,6 +51,7 @@ __all__ = [
     "DepthQuote",
     "Event",
     "EventEmitter",
+    "EventPublisher",
     "EventRouter",
     "ExecutionEvent",
     "MarginCallTriggerEvent",
@@ -57,6 +60,7 @@ __all__ = [
     "ReadyEvent",
     "ReconnectedEvent",
     "SpotEvent",
+    "SubscriptionRestoreFailedEvent",
     "SymbolChangedEvent",
     "TokenInvalidatedEvent",
     "TokenRefreshFailedEvent",
