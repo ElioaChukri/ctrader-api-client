@@ -238,11 +238,17 @@ class ClientDisconnectEvent:
 class AccountDisconnectEvent:
     """Account disconnect event.
 
-    Emitted when a specific account session is terminated by the server while
-    the underlying connection stays up. The client handles recovery
-    automatically: it re-authenticates the account on the existing connection
-    with backoff until it succeeds, then emits a ReadyEvent. This event is
-    informational; no user action is required to restore the session.
+    Emitted when an account's session has been terminated by the server while
+    the underlying connection stays up, and could not be re-established on the
+    spot. The client keeps re-authenticating on the existing connection with
+    backoff until it succeeds, then emits a ReadyEvent; no user action is
+    required to restore the session.
+
+    The server also reports a disconnect whenever the token behind an
+    authorization is rotated, for a session it has not actually ended. Those
+    reports are checked against the server and discarded, so they do not appear
+    here — every event published is a drop that outlived a re-authentication
+    attempt.
 
     Attributes:
         account_id: The cTID trader account ID.

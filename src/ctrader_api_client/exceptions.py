@@ -108,6 +108,15 @@ class AccountAuthError(AuthenticationError):
             message += f" - {description}"
         super().__init__(message)
 
+    def is_already_authorized(self) -> bool:
+        """Whether the account was rejected for holding a live session already.
+
+        The server refuses to authorize an account twice on one channel. A
+        caller that was trying to reach exactly that state has already reached
+        it, so this is a rejection worth reading as success.
+        """
+        return self.error_code == ProtoOAErrorCode.ALREADY_LOGGED_IN.name
+
 
 class TokenExpiredError(AuthenticationError):
     """Access token has expired."""
