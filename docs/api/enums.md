@@ -3,7 +3,7 @@
 Enumeration types used throughout the API.
 
 ```python
-from ctrader_api_client.enums import OrderType, OrderSide, ExecutionType
+from ctrader_api_client import ExecutionType, OrderSide, OrderType
 ```
 
 ## Trading Enums
@@ -49,12 +49,6 @@ from ctrader_api_client.enums import OrderType, OrderSide, ExecutionType
       members: true
 
 ## Account Enums
-
-
-::: ctrader_api_client.enums.Environment
-    options:
-      show_source: false
-      members: true
 
 
 ::: ctrader_api_client.enums.AccessRights

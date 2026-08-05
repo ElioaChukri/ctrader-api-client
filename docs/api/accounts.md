@@ -11,6 +11,8 @@ Access via `client.accounts`.
       show_source: false
       members:
         - get_trader
+        - list_by_token
+        - resolve_account_id
 
 ## Usage Examples
 
@@ -27,15 +29,17 @@ print(f"Broker name: {account.broker_name}")
 
 ## Account Discovery
 
-To discover available accounts for an access token, use the auth manager:
+The accounts an access token covers can be listed without authenticating any of
+them:
 
 ```python
 # Get all accounts associated with a token
-accounts = await client.auth.get_accounts(access_token)
-
-for acc in accounts:
+for acc in await client.accounts.list_by_token(access_token):
     print(f"Login: {acc.trader_login}, Account ID: {acc.account_id}")
     print(f"  Live: {acc.is_live}, Broker: {acc.broker_name}")
+
+# Or resolve a single login straight to its account ID
+account_id = await client.accounts.resolve_account_id(access_token, trader_login=12345678)
 ```
 
 ## Related

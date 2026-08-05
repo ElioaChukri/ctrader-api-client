@@ -24,7 +24,7 @@ Access via `client.market_data`.
 ### Subscribe to Spot Prices
 
 ```python
-from ctrader_api_client.events import SpotEvent
+from ctrader_api_client import SpotEvent
 
 # Subscribe to symbols
 await client.market_data.subscribe_spots(account_id, [270, 271])
@@ -39,8 +39,7 @@ async def on_price(event: SpotEvent):
 ### Subscribe to Live Trendbars
 
 ```python
-from ctrader_api_client.events import SpotEvent
-from ctrader_api_client.enums import TrendbarPeriod
+from ctrader_api_client import SpotEvent, TrendbarPeriod
 
 # Subscribe to M1 trendbars
 await client.market_data.subscribe_trendbars(account_id, symbol_id=270, period=TrendbarPeriod.M1)
@@ -59,7 +58,7 @@ async def on_spot(event: SpotEvent):
 ### Subscribe to Depth of Market
 
 ```python
-from ctrader_api_client.events import DepthEvent
+from ctrader_api_client import DepthEvent
 
 # Subscribe to order book
 await client.market_data.subscribe_depth(account_id, symbol_id=270)
@@ -76,7 +75,7 @@ async def on_depth(event: DepthEvent):
 
 ```python
 from datetime import datetime, timedelta, UTC
-from ctrader_api_client.enums import TrendbarPeriod
+from ctrader_api_client import TrendbarPeriod
 
 trendbars = await client.market_data.get_trendbars(
     account_id,
@@ -128,16 +127,28 @@ await client.market_data.unsubscribe_depth(account_id, symbol_id=270)
 
 ## Note on Subscriptions
 
-Subscriptions are **not** automatically restored after reconnection.
-It is recommended to use `ReadyEvent` to keep all subscriptions centralized in one place and ensure they are re-established after any disconnects.
+Subscriptions are restored automatically. `subscribe_spots`, `subscribe_trendbars`
+and `subscribe_depth` record what the account asked for, and the client re-applies
+it after a reconnection or an account recovery — before the account is announced
+as ready, so a `ReadyEvent` handler never sees a half-restored feed. Spots are
+re-applied before trendbars, which the server rejects without them.
+
+`unsubscribe_spots`, `unsubscribe_trendbars` and `unsubscribe_depth` withdraw the
+intent, so an unsubscribed symbol is not brought back. So does
+`client.auth.remove_account`, which discards everything held for that account.
+
+Do not re-subscribe from a `ReadyEvent` handler — the server rejects a duplicate
+subscription.
+
+If restoration fails, it stops at the first failure and emits a
+`SubscriptionRestoreFailedEvent`. The intent is kept, so the next reconnection
+tries again. Until then the account receives no data for the affected symbols:
 
 ```python
-from ctrader_api_client.events import ReadyEvent
-from ctrader_api_client.enums import TrendbarPeriod
+from ctrader_api_client import SubscriptionRestoreFailedEvent
 
-@client.on(ReadyEvent)
-async def on_ready(event: ReadyEvent):
-    # This runs on initial auth AND after reconnection
-    await client.market_data.subscribe_spots(event.account_id, [270, 271])
-    await client.market_data.subscribe_trendbars(event.account_id, 270, TrendbarPeriod.M1)
+
+@client.on(SubscriptionRestoreFailedEvent)
+async def on_restore_failed(event: SubscriptionRestoreFailedEvent):
+    logger.error("Account %d is missing market data: %s", event.account_id, event.error)
 ```

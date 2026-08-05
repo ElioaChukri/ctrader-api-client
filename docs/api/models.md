@@ -13,8 +13,7 @@ Request for placing a new order.
 **Example:**
 
 ```python
-from ctrader_api_client.models import NewOrderRequest
-from ctrader_api_client.enums import OrderType, OrderSide, TimeInForce
+from ctrader_api_client import NewOrderRequest, OrderSide, OrderType, TimeInForce
 
 # Get symbol for volume conversion
 symbol = await client.symbols.get_by_id(account_id, 270)
@@ -70,7 +69,7 @@ stop_order = NewOrderRequest(
 **Example:**
 
 ```python
-from ctrader_api_client.models import ClosePositionRequest
+from ctrader_api_client import ClosePositionRequest
 
 # Get position to know its volume
 positions = await client.trading.get_open_positions(account_id)

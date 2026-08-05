@@ -5,7 +5,7 @@ The client uses an event-driven architecture. Register handlers with `@client.on
 ## Registering Handlers
 
 ```python
-from ctrader_api_client.events import SpotEvent, ExecutionEvent
+from ctrader_api_client import ExecutionEvent, SpotEvent
 
 @client.on(SpotEvent, symbol_id=270)  # Filter by symbol
 async def on_spot(event: SpotEvent):
@@ -30,6 +30,7 @@ Different events support different filters:
 | OrderErrorEvent | Yes | No |
 | TraderUpdateEvent | Yes | No |
 | MarginChangeEvent | Yes | No |
+| SubscriptionRestoreFailedEvent | Yes | No |
 | ReconnectedEvent | No | No |
 | ClientDisconnectEvent | No | No |
 
@@ -44,7 +45,7 @@ Using an unsupported filter raises `ValueError` at registration time.
 **SpotEvent contains live trendbar data when subscribed:**
 
 ```python
-from ctrader_api_client.enums import TrendbarPeriod
+from ctrader_api_client import TrendbarPeriod
 
 # Subscribe to both spot prices and M1 trendbars
 await client.market_data.subscribe_spots(account_id, [270])
@@ -85,25 +86,29 @@ async def on_spot(event: SpotEvent):
     options:
       show_source: false
 
-**Use this to set up subscriptions that persist across reconnections.** It fires
-on initial auth, after a transport reconnection, and after recovery from a
+**Use this to reconcile account state after an interruption.** It fires on
+initial auth, after a transport reconnection, and after recovery from a
 server-side account disconnect — `is_reconnect` is `True` for the latter two:
 
 ```python
 @client.on(ReadyEvent)
 async def on_ready(event: ReadyEvent):
-    await client.market_data.subscribe_spots(event.account_id, [270])
-
     if event.is_reconnect:
-        print("Session restored!")
+        # Market data subscriptions are already restored. Positions opened or
+        # orders filled while disconnected produced events you never saw.
+        positions = await client.trading.get_open_positions(event.account_id)
+        my_book.replace(positions)
 ```
 
-`ReadyEvent` emission is driven by why authentication occurred, expressed as an
-`AuthTrigger`. It is emitted for `INITIAL`, `RECONNECT`, and `ACCOUNT_REAUTH`
-(all of which lose or re-establish subscriptions), and suppressed for
-`TOKEN_REFRESH` (session intact).
+Market data subscriptions are re-applied before this event is emitted, so do not
+re-subscribe here — the server rejects a duplicate subscription.
 
-::: ctrader_api_client.auth.AuthTrigger
+`event.trigger` carries the exact reason as an `AuthTrigger`, for cases where
+`is_reconnect` is too coarse. The event is emitted for `INITIAL`, `RECONNECT`,
+and `ACCOUNT_REAUTH` (all of which lose or re-establish subscriptions), and
+suppressed for `TOKEN_REFRESH` (session intact).
+
+::: ctrader_api_client.enums.AuthTrigger
     options:
       show_source: false
       members: true
@@ -166,6 +171,16 @@ The client keeps the existing credentials and retries on the next refresh check,
 so a single event usually means a transient outage. If the event keeps repeating,
 the refresh token is no longer usable and the account has to be re-authorized out
 of band.
+
+::: ctrader_api_client.events.SubscriptionRestoreFailedEvent
+    options:
+      show_source: false
+
+Emitted when the client could not re-apply an account's market data
+subscriptions to a new session. Restoration stops at the first failure, so
+anything after it in the sequence is missing too. The intent is kept and the
+next reconnection tries again, but until then the account receives no data for
+the affected symbols. Re-subscribe from a handler if you need it sooner.
 
 ## Symbol Events
 

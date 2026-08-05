@@ -57,6 +57,7 @@
       - Events: api/events.md
       - Models: api/models.md
       - Enums: api/enums.md
+      - Exceptions: api/exceptions.md
 
   markdown_extensions:
     - pymdownx.highlight:

@@ -26,8 +26,7 @@ Access via `client.trading`.
 ### Place a Market Order
 
 ```python
-from ctrader_api_client.models import NewOrderRequest
-from ctrader_api_client.enums import OrderType, OrderSide
+from ctrader_api_client import NewOrderRequest, OrderSide, OrderType
 
 # Get symbol info for volume conversion
 symbol = await client.symbols.get_by_id(account_id, 270)
@@ -89,7 +88,7 @@ print(f"Cancelled: {result.execution_type}")
 ### Close a Position
 
 ```python
-from ctrader_api_client.models import ClosePositionRequest
+from ctrader_api_client import ClosePositionRequest
 
 # First, get the position to know its volume
 positions = await client.trading.get_open_positions(account_id)
@@ -123,7 +122,7 @@ result = await client.trading.close_position(account_id, request)
 ### Modify Position SL/TP
 
 ```python
-from ctrader_api_client.models import AmendPositionRequest
+from ctrader_api_client import AmendPositionRequest
 
 request = AmendPositionRequest(
     position_id=123456,
