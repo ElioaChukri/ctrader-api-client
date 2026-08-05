@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol as TypingProtocol
 
+import anyio
+
 from ..enums import AuthTrigger
 from .credentials import AccountCredentials
 
@@ -77,6 +79,15 @@ class SessionAuthenticator(TypingProtocol):
         """Authorize an account, recording why so the right events follow."""
         ...
 
+    async def probe_session(self, account_id: int, timeout: float = 10.0) -> bool:
+        """Whether the account still holds a live session on this link.
+
+        Raises whatever stopped the question from being answered — including a
+        refusal that is about the token rather than the session — which is not
+        the same as an answer of no.
+        """
+        ...
+
 
 class SessionStore:
     """Every account the client knows about, keyed by cTID trader account ID.
@@ -89,6 +100,33 @@ class SessionStore:
 
     def __init__(self) -> None:
         self._accounts: dict[int, TrackedAccount] = {}
+
+        # Accounts whose authorization is being replaced by a token refresh.
+        # The server drops the old authorization as it issues the new pair, so
+        # for that stretch the account is genuinely unauthorized and answers
+        # nothing — a state no observer should mistake for a lost session.
+        self._refreshing: dict[int, anyio.Event] = {}
+
+    def begin_refresh(self, account_id: int) -> None:
+        """Note that the account's authorization is being replaced."""
+        if account_id not in self._refreshing:
+            self._refreshing[account_id] = anyio.Event()
+
+    def end_refresh(self, account_id: int) -> None:
+        """Note that it has been replaced, or that the attempt gave up."""
+        settled = self._refreshing.pop(account_id, None)
+        if settled is not None:
+            settled.set()
+
+    def is_refreshing(self, account_id: int) -> bool:
+        """Whether a refresh is currently replacing the account's authorization."""
+        return account_id in self._refreshing
+
+    async def wait_for_refresh(self, account_id: int) -> None:
+        """Wait until no refresh is replacing the account's authorization."""
+        settled = self._refreshing.get(account_id)
+        if settled is not None:
+            await settled.wait()
 
     def account_ids(self) -> list[int]:
         """Every account held, oldest first."""

@@ -142,6 +142,11 @@ class TokenRefresher:
 
         last_error: Exception | None = None
 
+        # Held from before the request goes out until the account is authorized
+        # again, because the disconnect the server reports for the old token
+        # arrives inside that window and means nothing about the session.
+        self._store.begin_refresh(account_id)
+
         try:
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self._policy.retry_attempts),
@@ -198,6 +203,8 @@ class TokenRefresher:
             last_error = e
         except Exception as e:
             last_error = e
+        finally:
+            self._store.end_refresh(account_id)
 
         if last_error is not None:
             raise TokenRefreshError(account_id, last_error)
