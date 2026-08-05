@@ -15,6 +15,8 @@ from .._internal.proto import (
     ProtoOAAccountAuthRes,
     ProtoOAApplicationAuthReq,
     ProtoOAApplicationAuthRes,
+    ProtoOATraderReq,
+    ProtoOATraderRes,
 )
 from ..enums import AuthTrigger
 from ..events import EventPublisher, ReadyEvent
@@ -237,6 +239,43 @@ class AuthManager:
             if self._restorer is not None:
                 await self._restorer.restore(credentials.account_id)
             await self._publisher.emit(ReadyEvent(account_id=credentials.account_id, trigger=trigger))
+
+    async def probe_session(self, account_id: int, timeout: float = 10.0) -> bool:
+        """Whether the account still holds a live session on this link.
+
+        Asks the server for something only an authorized account is told. The
+        request carries no access token of its own, but the authorization behind
+        it does: while a rotation is in flight the server refuses everything for
+        the account, including this. That refusal names the token, and it is
+        raised rather than answered, because it says nothing about the session.
+
+        Args:
+            account_id: The cTID trader account ID.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            True if the server still serves the account on this link.
+
+        Raises:
+            APIError: If the refusal is about the token rather than the account.
+            CTraderConnectionTimeoutError: If the request times out.
+            CTraderConnectionClosedError: If the link is gone.
+        """
+        request = ProtoOATraderReq(ctid_trader_account_id=account_id)
+
+        try:
+            await self._protocol.request(request, ProtoOATraderRes, timeout=timeout)
+        except APIError as e:
+            logger.debug(
+                "Account %d was refused a trader lookup: %s (%s)",
+                account_id,
+                e.error_code,
+                e.description,
+            )
+            if e.is_token_failure():
+                raise
+            return False
+        return True
 
     def remove_account(self, account_id: int) -> bool:
         """Remove an account from refresh monitoring.

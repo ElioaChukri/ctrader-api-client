@@ -14,6 +14,7 @@ from ctrader_api_client._internal.proto import (
     ProtoOAAccountDisconnectEvent,
     ProtoOAApplicationAuthReq,
     ProtoOARefreshTokenReq,
+    ProtoOATraderReq,
 )
 from ctrader_api_client.auth import AccountCredentials
 from ctrader_api_client.events import (
@@ -383,6 +384,8 @@ async def test_an_account_the_server_drops_is_re_authenticated(
     await authenticate(client, server)
     ready: Recorder[ReadyEvent] = Recorder()
     client.register_handler(ReadyEvent, ready)
+    # The server stands behind the report: it will not answer for the account.
+    server.on(ProtoOATraderReq, rejecting)
 
     await server.push(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
     await ready.wait_for(1)
@@ -398,6 +401,7 @@ async def test_a_dropped_account_stays_unauthorized_until_recovery_succeeds(
     await authenticate(client, server)
     dropped: Recorder[AccountDisconnectEvent] = Recorder()
     client.register_handler(AccountDisconnectEvent, dropped)
+    server.on(ProtoOATraderReq, rejecting)
     server.on(ProtoOAAccountAuthReq, rejecting)
 
     await server.push(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
@@ -419,14 +423,16 @@ async def test_a_disconnect_the_server_does_not_stand_behind_is_not_published(
     ready: Recorder[ReadyEvent] = Recorder()
     client.register_handler(AccountDisconnectEvent, dropped)
     client.register_handler(ReadyEvent, ready)
-    server.on(ProtoOAAccountAuthReq, already_logged_in)
+    server.respond(ProtoOATraderReq, factories.trader_res())
 
     await server.push(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
-    await server.wait_for_request(ProtoOAAccountAuthReq, count=2)
+    await server.wait_for_request(ProtoOATraderReq)
 
     assert dropped.count == 0
     assert ready.count == 0
     assert client.is_account_authorized(factories.ACCOUNT_ID) is True
+    # The account was never re-authorized, only asked after.
+    assert len(server.requests_of(ProtoOAAccountAuthReq)) == 1
 
 
 # -----------------------------------------------------------------------------

@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import anyio
 import betterproto
 import pytest
 
-from ctrader_api_client._internal.proto import ProtoOAAccountAuthReq, ProtoOARefreshTokenReq
+from ctrader_api_client._internal.proto import (
+    ProtoOAAccountAuthReq,
+    ProtoOARefreshTokenReq,
+    ProtoOATraderReq,
+)
 from ctrader_api_client.auth import AuthManager, ReauthPolicy, SessionRecovery, SessionStore
 from ctrader_api_client.enums import AuthTrigger
 from ctrader_api_client.events import AccountDisconnectEvent, ReadyEvent, TokenRefreshFailedEvent
-from ctrader_api_client.exceptions import APIError, TokenExpiredError
+from ctrader_api_client.exceptions import APIError, CTraderConnectionTimeoutError, TokenExpiredError
 
 from ...harness import ManualClock, RecordingPublisher, RecordingStore, StubProtocol, factories
 from .conftest import Monitors
@@ -304,6 +309,7 @@ async def test_an_account_the_server_confirms_is_gone_stops_being_authorized(
         ProtoOAAccountAuthReq,
         [factories.account_auth_res(), APIError(error_code="TEMPORARY")],
     )
+    protocol.respond(ProtoOATraderReq, APIError(error_code="ACCOUNT_NOT_AUTHORIZED"))
     await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
     await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED)
 
@@ -325,14 +331,11 @@ async def test_a_session_the_server_still_holds_is_left_alone(
     Regression guard: taking that report at face value marked a working account
     unauthorized, published a drop that never happened, and left recovery
     retrying an account the server would only ever refuse as already logged in.
+    Checking it by re-authorizing was no better, because the rotation that
+    prompts the report is what makes that check answer wrongly.
     """
-    protocol.respond_in_sequence(
-        ProtoOAAccountAuthReq,
-        [
-            factories.account_auth_res(),
-            APIError(error_code="ALREADY_LOGGED_IN", description="Trading account is already authorized"),
-        ],
-    )
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+    protocol.respond(ProtoOATraderReq, factories.trader_res())
     await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
     await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED)
 
@@ -341,6 +344,98 @@ async def test_a_session_the_server_still_holds_is_left_alone(
     assert auth.is_account_authorized(factories.ACCOUNT_ID)
     assert publisher.of(AccountDisconnectEvent) == []
     assert publisher.of(ReadyEvent) == [ReadyEvent(factories.ACCOUNT_ID, AuthTrigger.INITIAL)]
+    # Nothing re-authorized the account, so nothing could have disturbed the
+    # session the report was wrong about.
+    assert len(protocol.sent_of(ProtoOAAccountAuthReq)) == 1
+
+
+async def test_a_check_that_cannot_be_answered_leaves_the_account_alone(
+    auth: AuthManager,
+    monitors: Monitors,
+    protocol: StubProtocol,
+    clock: ManualClock,
+    publisher: RecordingPublisher,
+) -> None:
+    """Failing to ask is not the same as being told the session is gone.
+
+    Regression guard: anything that stopped the check from completing used to
+    count as confirmation, so a report that could not be checked took a working
+    account out of service.
+    """
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+    protocol.respond(ProtoOATraderReq, CTraderConnectionTimeoutError(10.0, "request"))
+    await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
+    await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED)
+
+    await monitors.recovery.handle_account_disconnect(factories.ACCOUNT_ID)
+
+    assert auth.is_account_authorized(factories.ACCOUNT_ID)
+    assert publisher.of(AccountDisconnectEvent) == []
+
+
+async def test_a_disconnect_reported_while_the_token_rotates_is_not_a_drop(
+    auth: AuthManager,
+    monitors: Monitors,
+    protocol: StubProtocol,
+    clock: ManualClock,
+    publisher: RecordingPublisher,
+    sessions: SessionStore,
+) -> None:
+    """The window a refresh opens is not a session anyone lost.
+
+    Regression guard: the server reports a disconnect for the authorization a
+    rotation replaces, and while the replacement is in flight the account is
+    genuinely unauthorized — it refuses everything with INVALID_REQUEST. Asking
+    it anything in that window and believing the answer published a drop for a
+    session that was serving requests a moment later.
+    """
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+    protocol.respond(ProtoOATraderReq, APIError(error_code="INVALID_REQUEST"))
+    await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
+    await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED)
+    sessions.begin_refresh(factories.ACCOUNT_ID)
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(monitors.recovery.handle_account_disconnect, factories.ACCOUNT_ID)
+        await anyio.sleep(0.01)
+        # Nothing has been decided while the rotation is in flight.
+        assert publisher.of(AccountDisconnectEvent) == []
+        assert not protocol.sent_of(ProtoOATraderReq)
+
+        protocol.respond(ProtoOATraderReq, factories.trader_res())
+        sessions.end_refresh(factories.ACCOUNT_ID)
+
+    assert auth.is_account_authorized(factories.ACCOUNT_ID)
+    assert publisher.of(AccountDisconnectEvent) == []
+    assert len(protocol.sent_of(ProtoOATraderReq)) == 1
+
+
+@pytest.mark.parametrize("error_code", ["OA_AUTH_TOKEN_EXPIRED", "CH_ACCESS_TOKEN_INVALID"])
+async def test_a_check_refused_over_the_token_leaves_the_account_alone(
+    error_code: str,
+    auth: AuthManager,
+    monitors: Monitors,
+    protocol: StubProtocol,
+    clock: ManualClock,
+    publisher: RecordingPublisher,
+) -> None:
+    """A refusal naming the token says nothing about the session behind it.
+
+    Regression guard: the server refuses everything for an account while a
+    rotation is in flight, and the disconnect it reports for that same rotation
+    arrives inside the window. Reading the refusal as an answer published a drop
+    for a session that was still being served.
+    """
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+    protocol.respond(ProtoOATraderReq, APIError(error_code=error_code))
+    await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
+    await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED)
+
+    await monitors.recovery.handle_account_disconnect(factories.ACCOUNT_ID)
+
+    assert auth.is_account_authorized(factories.ACCOUNT_ID)
+    assert publisher.of(AccountDisconnectEvent) == []
+    assert len(protocol.sent_of(ProtoOAAccountAuthReq)) == 1
 
 
 async def test_a_disconnected_account_is_re_authenticated(
@@ -351,6 +446,7 @@ async def test_a_disconnected_account_is_re_authenticated(
     publisher: RecordingPublisher,
 ) -> None:
     await start_with_account(auth, protocol, clock, expires_in=PLENTY_OF_TIME)
+    protocol.respond(ProtoOATraderReq, APIError(error_code="ACCOUNT_NOT_AUTHORIZED"))
 
     await monitors.recovery.handle_account_disconnect(factories.ACCOUNT_ID)
     await publisher.wait_for_type(ReadyEvent, count=2)
@@ -370,12 +466,13 @@ async def test_recovery_keeps_trying_after_a_failure(
         ProtoOAAccountAuthReq,
         [
             factories.account_auth_res(),
-            # The check that confirms the drop, then the first retry after it.
-            APIError(error_code="TEMPORARY"),
+            # The first recovery attempt after the drop is confirmed, then the
+            # retry that succeeds.
             APIError(error_code="TEMPORARY"),
             factories.account_auth_res(),
         ],
     )
+    protocol.respond(ProtoOATraderReq, APIError(error_code="ACCOUNT_NOT_AUTHORIZED"))
     await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
     await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED)
 
@@ -393,6 +490,7 @@ async def test_an_account_dropped_during_another_backoff_is_recovered_at_once(
     make_monitors: Callable[..., Monitors],
     protocol: StubProtocol,
     clock: ManualClock,
+    publisher: RecordingPublisher,
 ) -> None:
     """Backoff is per account, so a healthy account never queues behind a sick one."""
     stubborn = 111
@@ -411,12 +509,16 @@ async def test_an_account_dropped_during_another_backoff_is_recovered_at_once(
         return factories.account_auth_res()
 
     protocol.respond_with(ProtoOAAccountAuthReq, answer)
+    # Both reports are real: the server no longer serves either account.
+    protocol.respond(ProtoOATraderReq, APIError(error_code="ACCOUNT_NOT_AUTHORIZED"))
 
     await monitors.recovery.handle_account_disconnect(stubborn)
     # Its failed attempt parks recovery on a ten second backoff.
     await clock.wait_for_sleepers(SLEEPERS_WHEN_STARTED + 1)
 
     await monitors.recovery.handle_account_disconnect(healthy)
+    # Recovery re-authorizes it without waiting out the stubborn account's backoff.
+    await publisher.wait_for_type(ReadyEvent, count=3)
 
     assert auth.is_account_authorized(healthy)
     assert not auth.is_account_authorized(stubborn)
@@ -450,16 +552,14 @@ async def test_a_report_for_an_account_already_recovering_is_not_checked_again(
     indistinguishable from a second check of the same report.
     """
     recovery = SessionRecovery(store=sessions, authenticator=auth, publisher=publisher, clock=clock)
-    protocol.respond_in_sequence(
-        ProtoOAAccountAuthReq,
-        [factories.account_auth_res(), APIError(error_code="TEMPORARY")],
-    )
+    protocol.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
+    protocol.respond(ProtoOATraderReq, APIError(error_code="ACCOUNT_NOT_AUTHORIZED"))
     await auth.authenticate_trader(factories.credentials(expires_in=PLENTY_OF_TIME))
 
     await recovery.handle_account_disconnect(factories.ACCOUNT_ID)
-    checked = len(protocol.sent_of(ProtoOAAccountAuthReq))
+    checked = len(protocol.sent_of(ProtoOATraderReq))
     await recovery.handle_account_disconnect(factories.ACCOUNT_ID)
     await recovery.handle_account_disconnect(factories.ACCOUNT_ID)
 
-    assert len(protocol.sent_of(ProtoOAAccountAuthReq)) == checked
+    assert len(protocol.sent_of(ProtoOATraderReq)) == checked
     assert publisher.of(AccountDisconnectEvent) == [AccountDisconnectEvent(factories.ACCOUNT_ID)]

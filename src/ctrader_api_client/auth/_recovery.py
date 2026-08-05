@@ -104,14 +104,32 @@ class SessionRecovery:
         unauthorized and publish a drop that never occurred, so the report is
         checked against the server before anything acts on it.
 
-        Re-authenticating is the check: a session that is already live is
-        refused with `ALREADY_LOGGED_IN`, which says the report was spurious and
-        there is nothing to tell anyone. Any other answer means the session
-        really did end, and only then is the drop published and recovery armed.
+        Every report the server sends for a token rotation arrives while the
+        client is replacing that authorization, and for the length of that
+        replacement the account really is unauthorized: it answers nothing, and
+        asking it anything would only confirm a state the client is already
+        undoing. So the check waits for the refresh to settle before it asks.
+        The refresh always starts before the report it provokes, so there is no
+        ordering in which the report escapes the wait.
+
+        The check itself asks whether the account is still served on this link
+        rather than trying to re-authorize it, since re-authorizing answers for
+        the token as much as for the session.
+
+        A check that cannot be completed is not an answer of no. The account is
+        left as it was, because nothing has said the session ended.
 
         Args:
             account_id: The cTID trader account ID reported as disconnected.
         """
+        if self._store.is_refreshing(account_id):
+            logger.debug(
+                "Account %d was reported as disconnected while its token was being "
+                "refreshed; waiting for that to settle before checking",
+                account_id,
+            )
+            await self._store.wait_for_refresh(account_id)
+
         credentials = self._store.credentials(account_id)
         if credentials is None or not self._store.is_authorized(account_id):
             return
@@ -121,30 +139,36 @@ class SessionRecovery:
 
         self._verifying.add(account_id)
         try:
-            await self._authenticator.establish(credentials, AuthTrigger.ACCOUNT_REAUTH)
-        except AccountAuthError as e:
-            if e.is_already_authorized():
+            try:
+                alive = await self._authenticator.probe_session(account_id)
+            except Exception as e:
+                logger.debug(
+                    "Could not check the disconnect reported for account %d, leaving it as it is: %s",
+                    account_id,
+                    e,
+                )
+                return
+
+            if alive:
                 logger.debug(
                     "Account %d reported as disconnected still holds its session; ignoring",
                     account_id,
                 )
                 return
-            await self._report_dropped(account_id, e)
-        except Exception as e:
-            await self._report_dropped(account_id, e)
+
+            await self._report_dropped(account_id)
         finally:
             self._verifying.discard(account_id)
 
-    async def _report_dropped(self, account_id: int, error: Exception) -> None:
+    async def _report_dropped(self, account_id: int) -> None:
         """Publish a confirmed drop and arm recovery for it.
 
-        Reached once the server has refused to re-authorize the account, so the
-        session is genuinely gone and could not be re-established on the spot.
+        Reached once the server has stopped serving the account on this link, so
+        the session is genuinely gone.
         """
         logger.warning(
-            "Account %d disconnected by server; scheduling re-authentication: %s",
+            "Account %d disconnected by server; scheduling re-authentication",
             account_id,
-            error,
         )
         self._store.flag_for_recovery(account_id)
         self._reauth_signal.set()

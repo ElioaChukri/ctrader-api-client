@@ -16,6 +16,8 @@ from ctrader_api_client._internal.proto import (
     ProtoOAGetAccountListByAccessTokenRes,
     ProtoOARefreshTokenRes,
     ProtoOASpotEvent,
+    ProtoOATrader,
+    ProtoOATraderRes,
     ProtoOATrendbar,
 )
 from ctrader_api_client.auth import AccountCredentials
@@ -55,6 +57,14 @@ def app_auth_res() -> ProtoOAApplicationAuthRes:
 def account_auth_res(account_id: int = ACCOUNT_ID) -> ProtoOAAccountAuthRes:
     """A successful account authentication response."""
     return ProtoOAAccountAuthRes(ctid_trader_account_id=account_id)
+
+
+def trader_res(account_id: int = ACCOUNT_ID) -> ProtoOATraderRes:
+    """A successful trader lookup, which only an authorized account is given."""
+    return ProtoOATraderRes(
+        ctid_trader_account_id=account_id,
+        trader=ProtoOATrader(ctid_trader_account_id=account_id),
+    )
 
 
 def ctid_account(
