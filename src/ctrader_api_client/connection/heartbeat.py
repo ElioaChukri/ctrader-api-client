@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import anyio
 import anyio.abc
@@ -43,43 +44,49 @@ class HeartbeatManager:
         self._last_received: float = 0.0
         self._task_scope: anyio.CancelScope | None = None
         self._task_group: anyio.abc.TaskGroup | None = None
+        self._disposers: list[Callable[[], None]] = []
 
-    async def start(self) -> None:
-        """Start heartbeat monitoring.
+    async def serve(self, *, task_status: anyio.abc.TaskStatus[None] = anyio.TASK_STATUS_IGNORED) -> None:
+        """Run the heartbeat send loop until stopped or cancelled.
 
-        Registers event handlers and starts the heartbeat send loop.
+        Handler registration is undone as this returns, so a monitor that is no
+        longer running cannot keep resetting the inactivity timer.
+
+        Raises:
+            RuntimeError: If the monitor is already being served.
         """
-        # Track activity on any server message, not just heartbeats
-        self._protocol.on_event(betterproto.Message, self._record_activity)
-        # Keep heartbeat handler for debug logging
-        self._protocol.on_event(ProtoHeartbeatEvent, self._on_heartbeat)
+        if self._disposers:
+            raise RuntimeError("Heartbeat monitor is already running")
+
+        self._disposers = [
+            # Track activity on any server message, not just heartbeats
+            self._protocol.on_event(betterproto.Message, self._record_activity),
+            # Keep heartbeat handler for debug logging
+            self._protocol.on_event(ProtoHeartbeatEvent, self._on_heartbeat),
+        ]
         self._last_received = self._clock.now()
 
-        # Start heartbeat loop in background
-        self._task_group = anyio.create_task_group()
-        await self._task_group.__aenter__()
-        self._task_group.start_soon(self._heartbeat_loop)
         logger.debug("Heartbeat monitor started (interval=%.1fs, timeout=%.1fs)", self._interval, self._timeout)
+        try:
+            async with anyio.create_task_group() as task_group:
+                self._task_group = task_group
+                task_group.start_soon(self._heartbeat_loop)
+                task_status.started()
+        finally:
+            self._task_group = None
+            self._task_scope = None
+            for dispose in self._disposers:
+                dispose()
+            self._disposers.clear()
+            logger.debug("Heartbeat monitor stopped")
 
     async def stop(self) -> None:
-        """Stop heartbeat monitoring.
-
-        Cancels the heartbeat loop and removes event handlers.
-        """
+        """Ask the heartbeat loop to wind down."""
         if self._task_scope is not None:
             self._task_scope.cancel()
 
         if self._task_group is not None:
-            logger.debug("Heartbeat monitor stopped")
             self._task_group.cancel_scope.cancel()
-            try:
-                await self._task_group.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._task_group = None
-
-        self._protocol.remove_handler(betterproto.Message, self._record_activity)
-        self._protocol.remove_handler(ProtoHeartbeatEvent, self._on_heartbeat)
 
     async def restart(self) -> None:
         """Restart heartbeat monitoring after reconnection.

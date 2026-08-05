@@ -3,34 +3,28 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import anyio
 import pytest
 
 from ctrader_api_client import CTraderClient
 from ctrader_api_client._internal.proto import (
-    ProtoOAApplicationAuthReq,
     ProtoOASpotEvent,
     ProtoOATraderReq,
     ProtoOATraderRes,
 )
+from ctrader_api_client.composition import ClientGraph
 from ctrader_api_client.exceptions import CTraderConnectionClosedError
 
 from ...harness import FakeServer, Recorder, factories
 
 
-def _echo_trader(request: ProtoOATraderReq) -> ProtoOATraderRes:
-    return ProtoOATraderRes(ctid_trader_account_id=request.ctid_trader_account_id)
-
-
+@pytest.mark.usefixtures("echoing_trader")
 async def test_client_reconnects_after_the_server_drops_the_link(
     client: CTraderClient,
     server: FakeServer,
 ) -> None:
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
-    server.on(ProtoOATraderReq, _echo_trader)
-
     await server.drop_connection()
     await server.wait_for_connections(2)
 
@@ -50,8 +44,6 @@ async def test_reconnection_does_not_log_per_message_errors(
     as per-message errors and retry them without ever suspending, emitting
     thousands of identical warnings per second and pinning a core.
     """
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
-
     with caplog.at_level(logging.DEBUG, logger="ctrader_api_client.connection.protocol"):
         await server.drop_connection()
         await server.wait_for_connections(2)
@@ -63,11 +55,11 @@ async def test_reconnection_does_not_log_per_message_errors(
 
 async def test_pending_requests_fail_fast_when_reconnection_is_disabled(
     make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
     server: FakeServer,
 ) -> None:
     """A caller waiting on a dead connection is woken with an error, not left hanging."""
-    client = make_client(reconnect_attempts=0)
-    await client.connect()
+    client = await connected(make_client(reconnect_attempts=0))
     server.silence(ProtoOATraderReq)
 
     failures: list[Exception] = []
@@ -88,10 +80,10 @@ async def test_pending_requests_fail_fast_when_reconnection_is_disabled(
 
 async def test_requests_after_failed_reconnection_are_rejected(
     make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
     server: FakeServer,
 ) -> None:
-    client = make_client(reconnect_attempts=0)
-    await client.connect()
+    client = await connected(make_client(reconnect_attempts=0))
 
     await server.drop_connection()
     await server.wait_for_disconnect()
@@ -105,7 +97,6 @@ async def test_reconnection_restores_event_delivery(
     server: FakeServer,
 ) -> None:
     """The reader that survives a reconnect is the new one, not a stale duplicate."""
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
     spots: Recorder[ProtoOASpotEvent] = Recorder()
     client.protocol.on_event(ProtoOASpotEvent, spots)
 
@@ -116,3 +107,55 @@ async def test_reconnection_restores_event_delivery(
 
     assert spots.count == 1
     assert spots.only.bid == 111_111
+
+
+@pytest.mark.usefixtures("echoing_trader")
+async def test_a_failing_listener_does_not_block_reconnection(
+    make_graph: Callable[..., ClientGraph],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    """A listener that raises on the drop must not stop the client from reconnecting."""
+
+    class FailsOnLoss:
+        async def on_connection_lost(self) -> None:
+            raise RuntimeError("listener failed on disconnect")
+
+        async def on_connection_restored(self) -> None: ...
+
+    graph = make_graph()
+    graph.supervisor.add_listener(FailsOnLoss())
+    client = await connected(CTraderClient.from_graph(graph))
+
+    await server.drop_connection()
+    await server.wait_for_connections(2)
+
+    response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=8), ProtoOATraderRes)
+
+    assert response.ctid_trader_account_id == 8
+
+
+@pytest.mark.usefixtures("echoing_trader")
+async def test_a_failing_listener_does_not_leave_the_client_unusable(
+    make_graph: Callable[..., ClientGraph],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    """A listener that raises once the link is back must not undo the reconnection."""
+
+    class FailsOnRestore:
+        async def on_connection_lost(self) -> None: ...
+
+        async def on_connection_restored(self) -> None:
+            raise RuntimeError("listener failed on reconnect")
+
+    graph = make_graph()
+    graph.supervisor.add_listener(FailsOnRestore())
+    client = await connected(CTraderClient.from_graph(graph))
+
+    await server.drop_connection()
+    await server.wait_for_connections(2)
+
+    response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=9), ProtoOATraderRes)
+
+    assert response.ctid_trader_account_id == 9

@@ -9,7 +9,14 @@ It provides real(ish) boundaries to push bytes and messages through:
 """
 
 from .clock import ManualClock
-from .recorder import FailingRecorder, Recorder
+from .recorder import (
+    FailingRecorder,
+    Recorder,
+    RecordingPublisher,
+    RecordingRecovery,
+    RecordingRestorer,
+    RecordingStore,
+)
 from .server import FakeServer
 from .signals import Signal, wait_until
 from .stub_protocol import StubProtocol
@@ -21,6 +28,10 @@ __all__ = [
     "FakeServer",
     "ManualClock",
     "Recorder",
+    "RecordingPublisher",
+    "RecordingRecovery",
+    "RecordingRestorer",
+    "RecordingStore",
     "Signal",
     "StubProtocol",
     "ask",

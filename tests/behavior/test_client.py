@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 import betterproto
@@ -22,7 +22,11 @@ from ctrader_api_client.events import (
     SpotEvent,
     TokenRefreshFailedEvent,
 )
-from ctrader_api_client.exceptions import CTraderConnectionFailedError
+from ctrader_api_client.exceptions import (
+    ApplicationAuthError,
+    CTraderConnectionClosedError,
+    CTraderConnectionFailedError,
+)
 
 from ..harness import FakeServer, ManualClock, Recorder, factories
 
@@ -33,12 +37,10 @@ CHECK_INTERVAL = 60.0
 
 async def authenticate(client: CTraderClient, server: FakeServer) -> AccountCredentials:
     """Bring one account to a live, authorized session."""
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
     server.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
 
     credentials = factories.credentials()
-    await client.auth.authenticate_app()
-    await client.auth.authenticate_account(credentials)
+    await client.auth.authenticate_trader(credentials)
     return credentials
 
 
@@ -54,38 +56,82 @@ def rejecting(_request: betterproto.Message) -> betterproto.Message:
 
 async def test_connecting_opens_a_link_to_the_server(
     make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    client = await connected(make_client())
+
+    assert client.is_connected is True
+    assert server.connection_count == 1
+
+
+async def test_connecting_authenticates_the_application(
+    make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    """Nothing else can be asked of the server until the app is authenticated."""
+    client = await connected(make_client())
+
+    assert client.auth.is_app_authenticated is True
+    assert len(server.requests_of(ProtoOAApplicationAuthReq)) == 1
+
+
+async def test_a_rejected_application_stops_the_client_coming_up(
+    make_client: Callable[..., CTraderClient],
+    server: FakeServer,
+) -> None:
+    """A client that cannot authenticate is of no use, so it does not open."""
+    server.respond(
+        ProtoOAApplicationAuthReq,
+        factories.error_res(error_code="CH_CLIENT_AUTH_FAILURE", description="bad credentials"),
+    )
+    client = make_client()
+
+    with pytest.raises(ApplicationAuthError):
+        async with client:
+            pass
+
+    assert client.is_connected is False
+
+
+async def test_leaving_the_block_drops_the_link(
+    make_client: Callable[..., CTraderClient],
     server: FakeServer,
 ) -> None:
     client = make_client()
 
-    await client.connect()
-
-    assert client.is_connected is True
-    assert server.connection_count == 1
-
-
-async def test_connecting_an_already_connected_client_changes_nothing(
-    client: CTraderClient,
-    server: FakeServer,
-) -> None:
-    await client.connect()
-
-    assert server.connection_count == 1
-    assert client.is_connected is True
-
-
-async def test_closing_drops_the_link(client: CTraderClient, server: FakeServer) -> None:
-    await client.close()
+    async with client:
+        pass
     await server.wait_for_disconnect()
 
     assert client.is_connected is False
 
 
-async def test_closing_an_already_closed_client_is_harmless(client: CTraderClient) -> None:
-    await client.close()
-    await client.close()
+async def test_reconnecting_a_client_that_is_still_up_is_refused(
+    client: CTraderClient,
+) -> None:
+    """Entering twice would start a second set of loops the first would outlive."""
+    with pytest.raises(RuntimeError):
+        async with client:
+            pass
 
-    assert client.is_connected is False
+    assert client.is_connected is True
+
+
+async def test_sending_after_closing_is_rejected(
+    make_client: Callable[..., CTraderClient],
+) -> None:
+    """A closed connection must fail fast rather than hang or silently drop the call."""
+    client = make_client()
+    async with client:
+        pass
+
+    with pytest.raises(CTraderConnectionClosedError):
+        await client.protocol.send_request(ProtoOAApplicationAuthReq())
+
+    with pytest.raises(CTraderConnectionClosedError):
+        await client.protocol.send_event(ProtoOAApplicationAuthReq())
 
 
 async def test_the_context_manager_connects_and_closes(
@@ -94,8 +140,8 @@ async def test_the_context_manager_connects_and_closes(
 ) -> None:
     client = make_client()
 
-    async with client as connected:
-        assert connected.is_connected is True
+    async with client as connecting:
+        assert connecting.is_connected is True
         assert server.connection_count == 1
 
     assert client.is_connected is False
@@ -108,7 +154,26 @@ async def test_connecting_to_a_server_that_is_not_there_fails(
     client = make_client(port=1)
 
     with pytest.raises(CTraderConnectionFailedError):
-        await client.connect()
+        async with client:
+            pass
+
+    assert client.is_connected is False
+
+
+async def test_an_exception_from_the_block_reaches_the_caller_as_itself(
+    make_client: Callable[..., CTraderClient],
+) -> None:
+    """The background task group must not turn the caller's own error into a group.
+
+    The block's exception is carried out through the task group holding the
+    background tasks, and a task group reports even a single failure as an
+    ExceptionGroup. Callers write `except ValueError`, not `except*`.
+    """
+    client = make_client()
+
+    with pytest.raises(ValueError, match="from the block"):
+        async with client:
+            raise ValueError("from the block")
 
     assert client.is_connected is False
 
@@ -338,16 +403,14 @@ async def test_a_dropped_account_stays_unauthorized_until_recovery_succeeds(
 
 async def test_a_token_refresh_that_fails_is_reported_as_an_event(
     make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
     server: FakeServer,
     clock: ManualClock,
 ) -> None:
     """The account keeps running on its old token, so the failure needs its own signal."""
-    client = make_client(reconnect_attempts=0)
-    await client.connect()
-    server.respond(ProtoOAApplicationAuthReq, factories.app_auth_res())
+    client = await connected(make_client(reconnect_attempts=0))
     server.respond(ProtoOAAccountAuthReq, factories.account_auth_res())
-    await client.auth.authenticate_app()
-    await client.auth.authenticate_account(factories.credentials(expires_in=ALMOST_EXPIRED))
+    await client.auth.authenticate_trader(factories.credentials(expires_in=ALMOST_EXPIRED))
 
     failures: Recorder[TokenRefreshFailedEvent] = Recorder()
     client.register_handler(TokenRefreshFailedEvent, failures)

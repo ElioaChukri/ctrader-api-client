@@ -12,7 +12,7 @@ than a reimplementation of it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import betterproto
 
@@ -40,6 +40,31 @@ class StubProtocol(Protocol):
         self._disconnects = 0
         self._running = True
         self._changed = Signal()
+        self._live_handlers = 0
+
+    def on_event[M: betterproto.Message](
+        self,
+        message_type: type[M],
+        handler: Callable[[M], Awaitable[None]],
+    ) -> Callable[[], None]:
+        """Register as the real protocol does, counting what is still live.
+
+        Counted through the disposer the registration hands back rather than by
+        reading the protocol's own bookkeeping, so the harness observes only
+        what a caller can.
+        """
+        dispose = super().on_event(message_type, handler)
+        self._live_handlers += 1
+        disposed = False
+
+        def undo() -> None:
+            nonlocal disposed
+            dispose()
+            if not disposed:
+                disposed = True
+                self._live_handlers -= 1
+
+        return undo
 
     # -------------------------------------------------------------------------
     # Scripting
@@ -83,6 +108,15 @@ class StubProtocol(Protocol):
     def disconnect_count(self) -> int:
         """How many times disconnect handling was triggered."""
         return self._disconnects
+
+    @property
+    def handler_count(self) -> int:
+        """How many event handlers have been registered and not disposed."""
+        return self._live_handlers
+
+    def clear_sent(self) -> None:
+        """Forget what has been sent so far, to observe only what follows."""
+        self._sent.clear()
 
     def sent_of[M: betterproto.Message](self, message_type: type[M]) -> list[M]:
         """Every transmitted message of the given type."""

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from .._internal.proto import (
     ProtoOAGetTickDataReq,
@@ -25,8 +27,13 @@ from .._internal.proto import (
     ProtoOAUnsubscribeSpotsRes,
 )
 from ..enums import TrendbarPeriod
+from ..events import EventPublisher, SubscriptionRestoreFailedEvent
 from ..models import TickData, Trendbar
 from ._base import BaseAPI
+
+
+if TYPE_CHECKING:
+    from ..connection import Protocol
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +56,15 @@ _PERIOD_TO_PROTO: dict[TrendbarPeriod, int] = {
     TrendbarPeriod.W1: ProtoOATrendbarPeriod.W1,
     TrendbarPeriod.MN1: ProtoOATrendbarPeriod.MN1,
 }
+
+
+@dataclass
+class _StandingSubscriptions:
+    """What one account has asked for, kept so it can be re-applied later."""
+
+    spots: set[int] = field(default_factory=set)
+    trendbars: set[tuple[int, TrendbarPeriod]] = field(default_factory=set)
+    depth: set[int] = field(default_factory=set)
 
 
 class MarketDataAPI(BaseAPI):
@@ -79,6 +95,72 @@ class MarketDataAPI(BaseAPI):
         )
         ```
     """
+
+    def __init__(
+        self,
+        protocol: Protocol,
+        publisher: EventPublisher,
+        default_timeout: float = 30.0,
+    ) -> None:
+        """Initialize the market data namespace.
+
+        Args:
+            protocol: The protocol instance for sending requests.
+            publisher: Where SubscriptionRestoreFailedEvent is published.
+            default_timeout: Default request timeout in seconds.
+        """
+        super().__init__(protocol, default_timeout)
+        self._publisher = publisher
+        self._standing: dict[int, _StandingSubscriptions] = {}
+
+    def _standing_for(self, account_id: int) -> _StandingSubscriptions:
+        """The record of what this account has asked for, created on first use."""
+        return self._standing.setdefault(account_id, _StandingSubscriptions())
+
+    def forget(self, account_id: int) -> None:
+        """Drop what this account had asked for, so nothing is restored for it.
+
+        Called when the account leaves the auth manager. Without this the
+        record outlives the session it describes, and an account authenticated
+        again later would silently have subscriptions it never asked for
+        re-applied.
+
+        Args:
+            account_id: The account whose standing subscriptions to discard.
+        """
+        self._standing.pop(account_id, None)
+
+    async def restore(self, account_id: int) -> None:
+        """Re-apply this account's standing subscriptions to a fresh session.
+
+        A server-side session carries its own subscriptions, so anything the
+        account had asked for is gone once that session ends. Called after
+        re-authentication, before the account is announced as ready, so a
+        consumer's handler does not race a half-restored feed.
+
+        Restoration stops at the first failure and reports it, keeping the
+        intent so the next reconnection tries again.
+
+        Args:
+            account_id: The account whose subscriptions to re-apply.
+        """
+        standing = self._standing.get(account_id)
+        if standing is None:
+            return
+
+        try:
+            if standing.spots:
+                await self.subscribe_spots(account_id, sorted(standing.spots))
+
+            # Trendbars are rejected unless spots for the symbol are live.
+            for symbol_id, period in sorted(standing.trendbars, key=lambda item: (item[0], item[1].name)):
+                await self.subscribe_trendbars(account_id, symbol_id, period)
+
+            if standing.depth:
+                await self.subscribe_depth(account_id, sorted(standing.depth))
+        except Exception as e:
+            logger.error("Failed to restore subscriptions for account %d: %s", account_id, e)
+            await self._publisher.emit(SubscriptionRestoreFailedEvent(account_id=account_id, error=e))
 
     # -------------------------------------------------------------------------
     # Spot Subscriptions
@@ -116,6 +198,7 @@ class MarketDataAPI(BaseAPI):
             ProtoOASubscribeSpotsRes,
             timeout=self._timeout(timeout),
         )
+        self._standing_for(account_id).spots.update(symbol_ids)
 
     async def unsubscribe_spots(
         self,
@@ -145,6 +228,7 @@ class MarketDataAPI(BaseAPI):
             ProtoOAUnsubscribeSpotsRes,
             timeout=self._timeout(timeout),
         )
+        self._standing_for(account_id).spots.difference_update(symbol_ids)
 
     # -------------------------------------------------------------------------
     # Trendbar Subscriptions
@@ -186,6 +270,7 @@ class MarketDataAPI(BaseAPI):
             ProtoOASubscribeLiveTrendbarRes,
             timeout=self._timeout(timeout),
         )
+        self._standing_for(account_id).trendbars.add((symbol_id, period))
 
     async def unsubscribe_trendbars(
         self,
@@ -218,6 +303,7 @@ class MarketDataAPI(BaseAPI):
             ProtoOAUnsubscribeLiveTrendbarRes,
             timeout=self._timeout(timeout),
         )
+        self._standing_for(account_id).trendbars.discard((symbol_id, period))
 
     # -------------------------------------------------------------------------
     # Depth Subscriptions
@@ -254,6 +340,7 @@ class MarketDataAPI(BaseAPI):
             ProtoOASubscribeDepthQuotesRes,
             timeout=self._timeout(timeout),
         )
+        self._standing_for(account_id).depth.update(symbol_ids)
 
     async def unsubscribe_depth(
         self,
@@ -283,6 +370,7 @@ class MarketDataAPI(BaseAPI):
             ProtoOAUnsubscribeDepthQuotesRes,
             timeout=self._timeout(timeout),
         )
+        self._standing_for(account_id).depth.difference_update(symbol_ids)
 
     # -------------------------------------------------------------------------
     # Historical Data

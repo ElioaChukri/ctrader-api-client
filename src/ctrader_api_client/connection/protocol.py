@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TypeVar
 
 import anyio
@@ -30,6 +31,7 @@ from ..exceptions import (
     CTraderConnectionTimeoutError,
     FramingError,
 )
+from .listener import ConnectionListener
 from .transport import Transport
 
 
@@ -44,6 +46,21 @@ EventHandler = Callable[[T], Awaitable[None]]
 # escalates a stuck reader to a reconnection instead of an endless log flood.
 _READ_ERROR_BACKOFF = 0.05
 _MAX_CONSECUTIVE_READ_ERRORS = 10
+
+
+@dataclass(slots=True)
+class _PendingRequest:
+    """A request awaiting its correlated response.
+
+    Attributes:
+        event: Set once the outcome is known, or when the protocol stops.
+        outcome: The response, the error the server replied with, or None while
+            the request is still in flight. None after the event is set means
+            the wait was interrupted by shutdown rather than answered.
+    """
+
+    event: anyio.Event
+    outcome: betterproto.Message | Exception | None = None
 
 
 class Protocol:
@@ -72,9 +89,7 @@ class Protocol:
         self._id_generator = ClientMessageIdGenerator()
 
         # Request correlation
-        self._pending: dict[str, anyio.Event] = {}
-        self._results: dict[str, betterproto.Message] = {}
-        self._errors: dict[str, Exception] = {}
+        self._pending: dict[str, _PendingRequest] = {}
 
         # Event dispatch
         self._event_handlers: dict[type, list[EventHandler]] = {}
@@ -94,46 +109,52 @@ class Protocol:
         # reader loop and the heartbeat loop both detecting the same drop).
         self._reconnecting = False
 
-        # Lifecycle callbacks (see set_reconnect_handler/set_disconnect_handler)
-        self._on_reconnect: Callable[[], Awaitable[None]] | None = None
-        self._on_disconnect: Callable[[], Awaitable[None]] | None = None
+        # Told about link transitions; set by whoever owns this protocol.
+        self._listener: ConnectionListener | None = None
 
-    def set_reconnect_handler(self, handler: Callable[[], Awaitable[None]]) -> None:
-        """Register the callback run once the transport is back up.
+    def set_listener(self, listener: ConnectionListener) -> None:
+        """Register the party told when the link drops and when it comes back.
 
-        Called after a successful reconnection, before any queued work resumes,
-        so the owner can re-establish server-side state such as authentication.
+        Args:
+            listener: Normally the `ConnectionSupervisor` that owns this
+                protocol. Told before reconnection is attempted so it can
+                discard state that only holds while the link is up, and again
+                once the transport is back so it can re-establish it.
         """
-        self._on_reconnect = handler
-
-    def set_disconnect_handler(self, handler: Callable[[], Awaitable[None]]) -> None:
-        """Register the callback run as soon as a dropped link is detected.
-
-        Called before reconnection is attempted, so the owner can discard state
-        that only holds while the link is up.
-        """
-        self._on_disconnect = handler
+        self._listener = listener
 
     @property
     def is_connected(self) -> bool:
         """Whether protocol is connected and reader is running."""
         return self._transport.is_connected and self._running
 
-    async def start(self) -> None:
-        """Start the reader task.
+    async def serve(self, *, task_status: anyio.abc.TaskStatus[None] = anyio.TASK_STATUS_IGNORED) -> None:
+        """Run the reader and everything it spawns, until stopped or cancelled.
 
-        Call this after transport.connect() to begin reading messages.
+        Start this with `TaskGroup.start` after `transport.connect()`; it
+        reports itself started once the reader is live, so the caller does not
+        resume before it is safe to send.
+
+        Raises:
+            RuntimeError: If the protocol is already being served.
         """
         if self._running:
-            return
+            raise RuntimeError("Protocol is already running")
 
         self._running = True
-        self._task_group = anyio.create_task_group()
-        await self._task_group.__aenter__()
-        self._task_group.start_soon(self._reader_loop)
+        try:
+            async with anyio.create_task_group() as task_group:
+                self._task_group = task_group
+                task_group.start_soon(self._reader_loop)
+                task_status.started()
+        finally:
+            self._running = False
+            self._task_group = None
+            self._reader_scope = None
+            self._fail_pending("Connection closed")
 
     async def stop(self) -> None:
-        """Stop the reader task gracefully."""
+        """Ask the reader and its spawned work to wind down."""
         self._running = False
 
         if self._reader_scope is not None:
@@ -141,15 +162,6 @@ class Protocol:
 
         if self._task_group is not None:
             self._task_group.cancel_scope.cancel()
-            try:
-                await self._task_group.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._task_group = None
-
-        # Signal all pending requests to wake up
-        for event in self._pending.values():
-            event.set()
 
     async def send_request(
         self,
@@ -176,9 +188,9 @@ class Protocol:
         msg_id = self._id_generator.next_id()
         wrapped = wrap_message(message, client_msg_id=msg_id)
 
-        # Create event for this request
-        event = anyio.Event()
-        self._pending[msg_id] = event
+        # Create the correlation slot for this request
+        pending = _PendingRequest(event=anyio.Event())
+        self._pending[msg_id] = pending
 
         try:
             # Lock write and send message
@@ -188,24 +200,26 @@ class Protocol:
 
             # Wait for response
             with anyio.fail_after(timeout):
-                await event.wait()
+                await pending.event.wait()
 
             # Check if we were stopped
             if not self._running:
                 raise CTraderConnectionClosedError("Protocol stopped while waiting for response")
 
-            # Check for error response
-            if msg_id in self._errors:
-                raise self._errors.pop(msg_id)
+            # An unresolved outcome means the wait was broken by shutdown
+            # rather than answered.
+            if pending.outcome is None:
+                raise CTraderConnectionClosedError("Protocol stopped while waiting for response")
 
-            return self._results.pop(msg_id)
+            if isinstance(pending.outcome, Exception):
+                raise pending.outcome
+
+            return pending.outcome
 
         except TimeoutError:
             raise CTraderConnectionTimeoutError(timeout, "request") from None
         finally:
             self._pending.pop(msg_id, None)
-            self._results.pop(msg_id, None)
-            self._errors.pop(msg_id, None)
 
     async def request[R: betterproto.Message](
         self,
@@ -257,7 +271,7 @@ class Protocol:
             encoded = encode_with_length_prefix(wrapped)
             await self._transport.send(encoded)
 
-    def on_event(self, message_type: type[T], handler: EventHandler[T]) -> None:
+    def on_event(self, message_type: type[T], handler: EventHandler[T]) -> Callable[[], None]:
         """Register async handler for event type.
 
         Multiple handlers can be registered for the same event type.
@@ -265,10 +279,20 @@ class Protocol:
         Args:
             message_type: The protobuf message type to handle.
             handler: Async callable that receives the message.
+
+        Returns:
+            A callable that unregisters this handler. Callers that register and
+            unregister in different places should keep this instead of naming
+            the type and handler a second time.
         """
         if message_type not in self._event_handlers:
             self._event_handlers[message_type] = []
         self._event_handlers[message_type].append(handler)
+
+        def dispose() -> None:
+            self.remove_handler(message_type, handler)
+
+        return dispose
 
     def remove_handler(self, message_type: type[T], handler: EventHandler[T]) -> None:
         """Remove previously registered handler.
@@ -359,12 +383,10 @@ class Protocol:
         msg_id = proto_msg.client_msg_id
 
         # Check if this is a response to a pending request
-        if msg_id and msg_id in self._pending:
-            if isinstance(inner, ProtoOAErrorRes):
-                self._errors[msg_id] = APIError.from_proto(inner)
-            else:
-                self._results[msg_id] = inner
-            self._pending[msg_id].set()
+        pending = self._pending.get(msg_id) if msg_id else None
+        if pending is not None:
+            pending.outcome = APIError.from_proto(inner) if isinstance(inner, ProtoOAErrorRes) else inner
+            pending.event.set()
         else:
             # Server-initiated event
             await self._dispatch_event(inner)
@@ -437,11 +459,11 @@ class Protocol:
         # State tied to the dead link is invalid from this moment on. Report it
         # before reconnecting so nothing observes a session that no longer
         # exists, and never let a failing listener block the reconnection.
-        if self._on_disconnect is not None:
+        if self._listener is not None:
             try:
-                await self._on_disconnect()
+                await self._listener.on_connection_lost()
             except Exception:
-                logger.exception("Disconnect handler failed")
+                logger.exception("Connection listener failed on disconnect")
 
         self._task_group.start_soon(self._reconnect_task)
 
@@ -471,18 +493,20 @@ class Protocol:
             logger.error("Reconnection failed, giving up: %s", e)
             self._running = False
             # Wake all pending requests so callers fail fast instead of hanging.
-            for msg_id in list(self._pending.keys()):
-                self._errors[msg_id] = CTraderConnectionClosedError("Connection lost and reconnection failed")
-                self._pending[msg_id].set()
+            self._fail_pending("Connection lost and reconnection failed")
         except Exception:
             # Defensive: never let the reconnection task crash the task group.
             logger.exception("Unexpected error while reconnecting")
             self._running = False
-            for msg_id in list(self._pending.keys()):
-                self._errors[msg_id] = CTraderConnectionClosedError("Reconnection error")
-                self._pending[msg_id].set()
+            self._fail_pending("Reconnection error")
         finally:
             self._reconnecting = False
+
+    def _fail_pending(self, reason: str) -> None:
+        """Resolve every in-flight request with a connection error."""
+        for pending in self._pending.values():
+            pending.outcome = CTraderConnectionClosedError(reason)
+            pending.event.set()
 
     async def _reconnect(self) -> None:
         """Attempt reconnection with exponential backoff.
@@ -515,12 +539,12 @@ class Protocol:
         if self._task_group is not None:
             self._task_group.start_soon(self._reader_loop)
 
-        # Notify callback for re-authentication. The transport is already back
-        # up at this point, so a failure in the callback must not fail the
-        # reconnection itself — log it and let the caller's ReconnectedEvent
-        # surface the details.
-        if self._on_reconnect is not None:
+        # Report the recovery so server-side state can be re-established. The
+        # transport is already back up at this point, so a failure here must not
+        # fail the reconnection itself — log it and let the listener's own
+        # reporting surface the details.
+        if self._listener is not None:
             try:
-                await self._on_reconnect()
+                await self._listener.on_connection_restored()
             except Exception:
-                logger.exception("Post-reconnect re-authentication callback failed")
+                logger.exception("Connection listener failed on reconnect")
