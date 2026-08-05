@@ -133,7 +133,7 @@ class RecordingRecovery:
     def __init__(self) -> None:
         self.disconnected: list[int] = []
 
-    def handle_account_disconnect(self, account_id: int) -> None:
+    async def handle_account_disconnect(self, account_id: int) -> None:
         """Record the disconnected account."""
         self.disconnected.append(account_id)
 

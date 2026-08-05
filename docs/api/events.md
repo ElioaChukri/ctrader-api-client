@@ -159,6 +159,13 @@ the existing connection with backoff and emits a `ReadyEvent` on success. The
 event is informational; subscribe to it only if you want to observe or log the
 drop. Check current authorization with `client.is_account_authorized(account_id)`.
 
+A disconnect the server reports is checked before it is published. Rotating an
+access token makes the server report one for a session it has not ended, so the
+client re-authenticates to find out which it is: an account that still holds its
+session is refused as already authorized, and nothing is published. What reaches
+a handler is therefore always a session that was really gone at the moment it
+was checked.
+
 ::: ctrader_api_client.events.TokenInvalidatedEvent
     options:
       show_source: false

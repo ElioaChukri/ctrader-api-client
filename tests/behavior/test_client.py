@@ -17,6 +17,7 @@ from ctrader_api_client._internal.proto import (
 )
 from ctrader_api_client.auth import AccountCredentials
 from ctrader_api_client.events import (
+    AccountDisconnectEvent,
     ReadyEvent,
     ReconnectedEvent,
     SpotEvent,
@@ -47,6 +48,14 @@ async def authenticate(client: CTraderClient, server: FakeServer) -> AccountCred
 def rejecting(_request: betterproto.Message) -> betterproto.Message:
     """Reject whatever is asked."""
     return factories.error_res(error_code="ACCOUNT_NOT_AUTHORIZED")
+
+
+def already_logged_in(_request: betterproto.Message) -> betterproto.Message:
+    """Refuse the way the server refuses an account whose session is still live."""
+    return factories.error_res(
+        error_code="ALREADY_LOGGED_IN",
+        description="Trading account is already authorized in this channel",
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -387,13 +396,37 @@ async def test_a_dropped_account_stays_unauthorized_until_recovery_succeeds(
     server: FakeServer,
 ) -> None:
     await authenticate(client, server)
+    dropped: Recorder[AccountDisconnectEvent] = Recorder()
+    client.register_handler(AccountDisconnectEvent, dropped)
     server.on(ProtoOAAccountAuthReq, rejecting)
+
+    await server.push(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
+    # The drop is published once the server has confirmed it, which is also when
+    # the account stops counting as authorized.
+    await dropped.wait_for(1)
+
+    assert client.is_account_authorized(factories.ACCOUNT_ID) is False
+    assert client.is_connected is True
+
+
+async def test_a_disconnect_the_server_does_not_stand_behind_is_not_published(
+    client: CTraderClient,
+    server: FakeServer,
+) -> None:
+    """A token rotation makes the server report a disconnect it did not perform."""
+    await authenticate(client, server)
+    dropped: Recorder[AccountDisconnectEvent] = Recorder()
+    ready: Recorder[ReadyEvent] = Recorder()
+    client.register_handler(AccountDisconnectEvent, dropped)
+    client.register_handler(ReadyEvent, ready)
+    server.on(ProtoOAAccountAuthReq, already_logged_in)
 
     await server.push(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
     await server.wait_for_request(ProtoOAAccountAuthReq, count=2)
 
-    assert client.is_account_authorized(factories.ACCOUNT_ID) is False
-    assert client.is_connected is True
+    assert dropped.count == 0
+    assert ready.count == 0
+    assert client.is_account_authorized(factories.ACCOUNT_ID) is True
 
 
 # -----------------------------------------------------------------------------

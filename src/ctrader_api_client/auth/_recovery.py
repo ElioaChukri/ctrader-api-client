@@ -14,7 +14,8 @@ import anyio.abc
 
 from .._internal import Clock, MonotonicClock
 from ..enums import AuthTrigger
-from ..events import EventPublisher, ReconnectedEvent
+from ..events import AccountDisconnectEvent, EventPublisher, ReadyEvent, ReconnectedEvent
+from ..exceptions import AccountAuthError
 from ._session import AwaitingRecovery, SessionAuthenticator, SessionStore
 from .policy import ReauthPolicy
 
@@ -55,6 +56,10 @@ class SessionRecovery:
         # Wakes the recovery monitor when an account needs re-authenticating
         self._reauth_signal = anyio.Event()
 
+        # Accounts whose reported disconnect is still being checked, so a
+        # repeated report does not start a second check against the server.
+        self._verifying: set[int] = set()
+
         self._task_scope: anyio.CancelScope | None = None
         self._running = False
 
@@ -90,24 +95,60 @@ class SessionRecovery:
         if self._task_scope is not None:
             self._task_scope.cancel()
 
-    def handle_account_disconnect(self, account_id: int) -> None:
-        """Handle a server-side account disconnect.
+    async def handle_account_disconnect(self, account_id: int) -> None:
+        """Establish whether a reported account disconnect actually happened.
 
-        Marks the account's session as no longer authorized and schedules
-        recovery re-authentication on the existing connection. Idempotent while
-        a recovery is already pending for the account.
+        The server reports a disconnect whenever the token behind an
+        authorization is rotated, even though the session on this channel is
+        untouched. Taking the report at face value would mark a working account
+        unauthorized and publish a drop that never occurred, so the report is
+        checked against the server before anything acts on it.
+
+        Re-authenticating is the check: a session that is already live is
+        refused with `ALREADY_LOGGED_IN`, which says the report was spurious and
+        there is nothing to tell anyone. Any other answer means the session
+        really did end, and only then is the drop published and recovery armed.
 
         Args:
             account_id: The cTID trader account ID reported as disconnected.
         """
-        if not self._store.flag_for_recovery(account_id):
+        credentials = self._store.credentials(account_id)
+        if credentials is None or not self._store.is_authorized(account_id):
             return
 
-        self._reauth_signal.set()
+        if account_id in self._verifying:
+            return
+
+        self._verifying.add(account_id)
+        try:
+            await self._authenticator.establish(credentials, AuthTrigger.ACCOUNT_REAUTH)
+        except AccountAuthError as e:
+            if e.is_already_authorized():
+                logger.debug(
+                    "Account %d reported as disconnected still holds its session; ignoring",
+                    account_id,
+                )
+                return
+            await self._report_dropped(account_id, e)
+        except Exception as e:
+            await self._report_dropped(account_id, e)
+        finally:
+            self._verifying.discard(account_id)
+
+    async def _report_dropped(self, account_id: int, error: Exception) -> None:
+        """Publish a confirmed drop and arm recovery for it.
+
+        Reached once the server has refused to re-authorize the account, so the
+        session is genuinely gone and could not be re-established on the spot.
+        """
         logger.warning(
-            "Account %d disconnected by server; scheduling re-authentication",
+            "Account %d disconnected by server; scheduling re-authentication: %s",
             account_id,
+            error,
         )
+        self._store.flag_for_recovery(account_id)
+        self._reauth_signal.set()
+        await self._publisher.emit(AccountDisconnectEvent(account_id=account_id))
 
     async def on_connection_lost(self) -> None:
         """Discard the sessions that died with the link.
@@ -229,6 +270,26 @@ class SessionRecovery:
             for account_id, credentials, state in due:
                 try:
                     await self._authenticator.establish(credentials, AuthTrigger.ACCOUNT_REAUTH)
+                except AccountAuthError as e:
+                    if not e.is_already_authorized():
+                        logger.warning(
+                            "Recovery re-authentication for account %d failed, will retry: %s",
+                            account_id,
+                            e,
+                        )
+                        self._defer_recovery(account_id, state)
+                        continue
+                    # The session came back by some other route between
+                    # attempts. Retrying could only be refused the same way, so
+                    # take the account as recovered and announce it, noting that
+                    # nothing re-applied the subscriptions the dead session took
+                    # with it.
+                    logger.warning(
+                        "Account %d holds a session again; its subscriptions were not re-applied",
+                        account_id,
+                    )
+                    self._store.authorize(credentials)
+                    await self._publisher.emit(ReadyEvent(account_id=account_id, trigger=AuthTrigger.ACCOUNT_REAUTH))
                 except Exception as e:
                     logger.warning(
                         "Recovery re-authentication for account %d failed, will retry: %s",

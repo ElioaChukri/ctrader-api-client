@@ -27,7 +27,6 @@ from ..models import Trendbar
 from ._execution import execution_event_from_proto
 from .emitter import EventEmitter
 from .types import (
-    AccountDisconnectEvent,
     ClientDisconnectEvent,
     DepthEvent,
     DepthQuote,
@@ -52,8 +51,8 @@ logger = logging.getLogger(__name__)
 class SessionRecovery(TypingProtocol):
     """Whatever knows how to restore an account session the server dropped."""
 
-    def handle_account_disconnect(self, account_id: int) -> None:
-        """Schedule re-authentication for the disconnected account."""
+    async def handle_account_disconnect(self, account_id: int) -> None:
+        """Check the reported disconnect, then publish and recover a real one."""
         ...
 
 
@@ -276,13 +275,15 @@ class EventRouter:
         self,
         proto: ProtoOAAccountDisconnectEvent,
     ) -> None:
-        """Convert ProtoOAAccountDisconnectEvent to AccountDisconnectEvent."""
-        event = AccountDisconnectEvent(
-            account_id=proto.ctid_trader_account_id,
-        )
-        logger.warning("Account %d disconnected by server", event.account_id)
-        self._recovery.handle_account_disconnect(event.account_id)
-        await self._emitter.emit(event)
+        """Hand a reported account disconnect to recovery, which publishes it.
+
+        The server reports a disconnect on every token rotation, for a session
+        it has not actually ended, so the report is checked before anyone hears
+        about it. Recovery does that checking and emits `AccountDisconnectEvent`
+        only for a drop that turns out to be real.
+        """
+        logger.debug("Account %d reported as disconnected by server", proto.ctid_trader_account_id)
+        await self._recovery.handle_account_disconnect(proto.ctid_trader_account_id)
 
     async def _handle_symbol_changed(
         self,

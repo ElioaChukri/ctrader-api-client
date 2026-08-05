@@ -542,16 +542,17 @@ async def test_a_client_disconnect_carries_its_reason(
     assert received.only.reason == "Maintenance"
 
 
-async def test_an_account_disconnect_names_the_account(
+async def test_an_account_disconnect_is_not_published_by_the_router(
     routing: EventEmitter,
     protocol: StubProtocol,
 ) -> None:
+    """The report is unverified here; recovery publishes the ones that hold up."""
     received: Recorder[AccountDisconnectEvent] = Recorder()
     routing.subscribe(AccountDisconnectEvent, received)
 
     await protocol.emit(ProtoOAAccountDisconnectEvent(ctid_trader_account_id=factories.ACCOUNT_ID))
 
-    assert received.only.account_id == factories.ACCOUNT_ID
+    assert received.count == 0
 
 
 @pytest.mark.usefixtures("routing")
