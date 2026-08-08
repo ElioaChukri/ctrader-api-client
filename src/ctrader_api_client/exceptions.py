@@ -68,6 +68,39 @@ class CTraderConnectionTimeoutError(CTraderConnectionError):
         super().__init__(f"{operation} timed out after {timeout_seconds}s")
 
 
+class CTraderReconnectAbandonedError(CTraderConnectionError):
+    """The client tried to restore a dropped link and gave up.
+
+    Raised out of the `async with client:` block, tearing the client down
+    rather than leaving it alive but permanently offline. A client that has
+    stopped reconnecting can never recover on its own — there is no reader and
+    no heartbeat left to notice anything — so the only useful thing it can do
+    is say so where a supervisor will see it.
+
+    Reaching this is not expected. Reconnection is unbounded by default, so a
+    server that stays unreachable produces retries rather than this error. It
+    means either that `reconnect_attempts` was set to a finite number and every
+    one was used, or that something went wrong that the reconnection logic did
+    not anticipate.
+
+    Not raised when reconnection is disabled outright with
+    `reconnect_attempts=0`: not reconnecting is the documented outcome there,
+    not a failure.
+
+    Attributes:
+        reason: What was being attempted when it was abandoned.
+        cause: The final underlying failure, also set as `__cause__`.
+    """
+
+    def __init__(self, reason: str, cause: BaseException | None = None) -> None:
+        self.reason = reason
+        self.cause = cause
+        message = f"Reconnection abandoned: {reason}"
+        if cause:
+            message += f" ({cause})"
+        super().__init__(message)
+
+
 # =============================================================================
 # Authentication Errors
 # =============================================================================

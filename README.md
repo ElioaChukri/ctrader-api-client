@@ -335,10 +335,14 @@ config = ClientConfig(
     heartbeat_timeout=30.0, # Or 0 to disable server heartbeat checks
     request_timeout=30.0,
 
-    # Reconnection
-    reconnect_attempts=5,
+    # Reconnection: None retries for as long as the client is open (the
+    # default), an integer caps the attempts, 0 disables reconnection. A
+    # finite budget that runs out raises CTraderReconnectAbandonedError out
+    # of the `async with client:` block.
+    reconnect_attempts=None,
     reconnect_min_wait=1.0,
     reconnect_max_wait=60.0,
+    connect_timeout=30.0,
 
     # Token refresh: when to refresh access tokens and how hard to retry
     refresh_policy=RefreshPolicy(

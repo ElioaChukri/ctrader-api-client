@@ -153,6 +153,32 @@ other handlers for that event.
     options:
       show_source: false
 
+::: ctrader_api_client.CTraderReconnectAbandonedError
+    options:
+      show_source: false
+
+This is the one connection exception that reaches you without your having called
+anything: it is raised out of the `async with client:` block itself. Reconnection
+is unbounded by default, so seeing it means either that `reconnect_attempts` was
+set to a finite number and every one was spent, or that something failed which
+the reconnection logic did not anticipate.
+
+```python
+while True:
+    try:
+        async with client:
+            await asyncio.Event().wait()
+    except CTraderReconnectAbandonedError:
+        logger.exception("Client abandoned its connection; starting a new one")
+        await asyncio.sleep(30)
+```
+
+Catching it is only worthwhile if you intend to build a fresh client, since the
+one that raised it is finished. Letting it propagate and having a process
+supervisor restart you is an equally good answer, and the reason it is raised
+rather than logged: a client that has stopped reconnecting has no reader and no
+heartbeat left to notice anything, so nothing short of a restart brings it back.
+
 ### Authentication
 
 ::: ctrader_api_client.AuthenticationError

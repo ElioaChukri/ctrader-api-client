@@ -18,17 +18,21 @@ class Transport:
     Handles raw socket connections without knowledge of protobuf or message semantics.
     """
 
-    def __init__(self, host: str, port: int, use_ssl: bool = True) -> None:
+    def __init__(self, host: str, port: int, use_ssl: bool = True, connect_timeout: float = 30.0) -> None:
         """Initialize transport configuration.
 
         Args:
             host: The server hostname to connect to.
             port: The server port to connect to.
             use_ssl: Whether to use SSL/TLS encryption. Defaults to True.
+            connect_timeout: Seconds to allow for the TCP connection and the
+                TLS handshake together. Bounds the one failure mode a caller
+                cannot retry: a handshake that neither completes nor fails.
         """
         self._host = host
         self._port = port
         self._ssl = use_ssl
+        self._connect_timeout = connect_timeout
         self._stream: ByteStream | None = None
 
     @property
@@ -62,6 +66,12 @@ class Transport:
 
         If already connected, this method returns immediately.
 
+        Either returns with a usable stream or raises
+        `CTraderConnectionFailedError`. There is deliberately no third outcome:
+        anything that goes wrong on the way to a connection *is* a failure to
+        connect, whatever its type, so callers can retry on one exception
+        rather than on a list of them that has to be kept complete.
+
         Raises:
             CTraderConnectionFailedError: If connection cannot be established.
         """
@@ -69,17 +79,25 @@ class Transport:
             return  # Already connected
 
         try:
-            if self._ssl:
-                ssl_context = ssl.create_default_context()
-                self._stream = await anyio.connect_tcp(
-                    self._host,
-                    self._port,
-                    ssl_context=ssl_context,
-                    tls_standard_compatible=True,
-                )
-            else:
-                self._stream = await anyio.connect_tcp(self._host, self._port)
-        except OSError as e:
+            # Every failure is translated, not an enumerated set of them. A TLS
+            # handshake cut short by the peer surfaces as anyio's
+            # BrokenResourceError, which is not an OSError and so used to
+            # escape untranslated — past the retry loop that only knew
+            # CTraderConnectionFailedError, and into the handler that reads an
+            # unrecognised exception as fatal. Cancellation still passes
+            # through: anyio raises it from BaseException, not Exception.
+            with anyio.fail_after(self._connect_timeout):
+                if self._ssl:
+                    ssl_context = ssl.create_default_context()
+                    self._stream = await anyio.connect_tcp(
+                        self._host,
+                        self._port,
+                        ssl_context=ssl_context,
+                        tls_standard_compatible=True,
+                    )
+                else:
+                    self._stream = await anyio.connect_tcp(self._host, self._port)
+        except Exception as e:
             raise CTraderConnectionFailedError(self._host, self._port, e) from e
 
         if self._ssl:

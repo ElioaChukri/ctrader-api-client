@@ -12,6 +12,7 @@ from tenacity import (
     AsyncRetrying,
     retry_if_exception_type,
     stop_after_attempt,
+    stop_never,
     wait_exponential,
 )
 
@@ -29,6 +30,7 @@ from ..exceptions import (
     CTraderConnectionClosedError,
     CTraderConnectionFailedError,
     CTraderConnectionTimeoutError,
+    CTraderReconnectAbandonedError,
     FramingError,
 )
 from .listener import ConnectionListener
@@ -73,7 +75,7 @@ class Protocol:
     def __init__(
         self,
         transport: Transport,
-        reconnect_attempts: int = 5,
+        reconnect_attempts: int | None = None,
         reconnect_min_wait: float = 1.0,
         reconnect_max_wait: float = 60.0,
     ) -> None:
@@ -81,7 +83,10 @@ class Protocol:
 
         Args:
             transport: The underlying transport for sending/receiving data.
-            reconnect_attempts: Maximum reconnection attempts (0 to disable).
+            reconnect_attempts: Maximum reconnection attempts. None retries for
+                as long as the client is open, which is the default: an outage
+                that outlasts a finite budget otherwise leaves a client that
+                can never recover. 0 disables reconnection entirely.
             reconnect_min_wait: Initial wait between attempts (seconds).
             reconnect_max_wait: Maximum wait between attempts (seconds).
         """
@@ -500,6 +505,11 @@ class Protocol:
         working — reported through `handle_disconnect` as `_redo_requested`, the
         only route left once the reader has exited — is reconnected too instead
         of being stranded.
+
+        Raises:
+            CTraderReconnectAbandonedError: If reconnection is given up on. This
+                is deliberately allowed to escape into the protocol task group
+                and tear the client down: see :meth:`_abandon`.
         """
         try:
             while True:
@@ -535,17 +545,45 @@ class Protocol:
                 await self._notify_connection_lost()
         except (CTraderConnectionFailedError, CTraderConnectionClosedError) as e:
             logger.error("Reconnection failed, giving up: %s", e)
-            self._running = False
-            # Wake all pending requests so callers fail fast instead of hanging.
-            self._fail_pending("Connection lost and reconnection failed")
-        except Exception:
-            # Defensive: never let the reconnection task crash the task group.
+            self._abandon("connection lost and reconnection failed", e)
+        except Exception as e:
+            # Nothing here is expected to fail this way — the retry loop below
+            # absorbs every failure connecting — so treat it as a defect rather
+            # than a state to sit quietly in.
             logger.exception("Unexpected error while reconnecting")
-            self._running = False
-            self._fail_pending("Reconnection error")
+            self._abandon("unexpected error while reconnecting", e)
         finally:
             self._reconnecting = False
             self._redo_requested = False
+
+    def _abandon(self, reason: str, cause: BaseException) -> None:
+        """Stop the protocol and make giving up impossible to miss.
+
+        A client that has stopped reconnecting cannot recover on its own: the
+        reader has exited, the heartbeat loop returns as soon as its next write
+        fails, and `handle_disconnect` refuses everything once `_running` is
+        False. Nothing is left that could try again. Staying alive in that state
+        only means a consumer polling `is_connected` sees a link that is down
+        and assumes, reasonably and wrongly, that something is working on it.
+
+        So the failure is raised instead of recorded. It escapes into the
+        protocol task group, through the supervisor's, and out of the
+        `async with client:` block, where a process supervisor will see it.
+
+        Raises:
+            CTraderReconnectAbandonedError: Always, unless reconnection was
+                disabled by configuration, which is a choice rather than a
+                failure and keeps the previous behaviour of a client that
+                rejects further requests.
+        """
+        self._running = False
+        # Wake all pending requests so callers fail fast instead of hanging.
+        self._fail_pending(reason)
+
+        if self._reconnect_attempts == 0:
+            return
+
+        raise CTraderReconnectAbandonedError(reason, cause) from cause
 
     def _fail_pending(self, reason: str) -> None:
         """Resolve every in-flight request with a connection error."""
@@ -556,27 +594,35 @@ class Protocol:
     async def _reconnect(self) -> None:
         """Attempt reconnection with exponential backoff.
 
+        Retries on *any* failure rather than on an enumerated set of exception
+        types. The budget exists to outlast a server that cannot be reached,
+        and an unrecognised exception is no evidence that it can be: a
+        whitelist here meant an exception nobody had thought of skipped the
+        retries entirely and went straight to being fatal.
+
         Raises:
-            CTraderConnectionClosedError: If reconnection is disabled or all attempts fail.
-            CTraderConnectionFailedError: If connection cannot be established.
+            CTraderConnectionClosedError: If reconnection is disabled.
+            CTraderConnectionFailedError: If every attempt in the budget failed.
         """
         if self._reconnect_attempts == 0:
             raise CTraderConnectionClosedError("Connection lost and reconnection disabled")
 
+        budget = "unlimited" if self._reconnect_attempts is None else self._reconnect_attempts
+
         async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self._reconnect_attempts),
+            stop=stop_never if self._reconnect_attempts is None else stop_after_attempt(self._reconnect_attempts),
             wait=wait_exponential(
                 min=self._reconnect_min_wait,
                 max=self._reconnect_max_wait,
             ),
-            retry=retry_if_exception_type(CTraderConnectionFailedError),
+            retry=retry_if_exception_type(Exception),
             reraise=True,
         ):
             with attempt:
                 logger.debug(
-                    "Reconnection attempt %d/%d",
+                    "Reconnection attempt %d/%s",
                     attempt.retry_state.attempt_number,
-                    self._reconnect_attempts,
+                    budget,
                 )
                 await self._transport.connect()
 

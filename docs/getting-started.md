@@ -312,12 +312,21 @@ config = ClientConfig(
     heartbeat_timeout=0,  # 0 to disable server heartbeat checks (default)
     request_timeout=30.0,
 
-    # Reconnection
-    reconnect_attempts=5,
+    # Reconnection: None retries for as long as the client is open (the
+    # default), an integer caps the attempts, 0 disables reconnection.
+    reconnect_attempts=None,
     reconnect_min_wait=1.0,
     reconnect_max_wait=60.0,
+    connect_timeout=30.0,
 )
 ```
+
+Reconnection is unbounded by default because a finite budget that runs out
+leaves a client that can never recover: there is no reader and no heartbeat left
+to notice anything, so it stays offline until the process restarts. If you do
+set a finite `reconnect_attempts`, spending it raises
+`CTraderReconnectAbandonedError` out of the `async with client:` block rather
+than leaving the client alive and permanently disconnected.
 
 ## Next Steps
 

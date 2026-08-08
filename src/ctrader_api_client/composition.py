@@ -78,6 +78,7 @@ def build_graph(
         host=config.host,
         port=config.port,
         use_ssl=config.use_ssl,
+        connect_timeout=config.connect_timeout,
     )
     protocol = Protocol(
         transport=transport,

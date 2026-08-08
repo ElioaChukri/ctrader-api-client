@@ -17,7 +17,12 @@ class ClientConfig(BaseModel):
         heartbeat_interval: Seconds between heartbeat sends.
         heartbeat_timeout: Seconds without server-initiated messages before disconnect. Set to 0 to disable.
         request_timeout: Default timeout for API requests in seconds.
-        reconnect_attempts: Max reconnection attempts (0 to disable).
+        connect_timeout: Seconds allowed for the TCP connection and TLS
+            handshake together, after which the attempt is failed and retried.
+        reconnect_attempts: Max reconnection attempts. None (the default)
+            retries for as long as the client is open. 0 disables reconnection.
+            A finite budget that runs out abandons the connection and raises
+            CTraderReconnectAbandonedError out of the `async with` block.
         reconnect_min_wait: Initial wait between reconnection attempts.
         reconnect_max_wait: Maximum wait between reconnection attempts.
         refresh_policy: When to refresh access tokens and how hard to try.
@@ -51,9 +56,10 @@ class ClientConfig(BaseModel):
 
     # Request settings
     request_timeout: float = Field(default=30.0, gt=0)
+    connect_timeout: float = Field(default=30.0, gt=0)
 
     # Reconnection settings
-    reconnect_attempts: int = Field(default=5, ge=0)
+    reconnect_attempts: int | None = Field(default=None, ge=0)
     reconnect_min_wait: float = Field(default=1.0, gt=0)
     reconnect_max_wait: float = Field(default=60.0, gt=0)
 
