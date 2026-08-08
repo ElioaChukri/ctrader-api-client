@@ -15,6 +15,7 @@ from ctrader_api_client._internal.proto import (
     ProtoOATraderRes,
 )
 from ctrader_api_client.composition import ClientGraph
+from ctrader_api_client.connection import Transport
 from ctrader_api_client.exceptions import CTraderConnectionClosedError
 
 from ...harness import FakeServer, Recorder, factories
@@ -107,6 +108,102 @@ async def test_reconnection_restores_event_delivery(
 
     assert spots.count == 1
     assert spots.only.bid == 111_111
+
+
+async def test_closing_a_transport_whose_socket_is_broken_does_not_raise() -> None:
+    """A socket that refuses a graceful shutdown is still going away.
+
+    A broken TLS session raises `BrokenResourceError` out of `aclose()`, because
+    the close-notify it tries to write cannot be sent. That is the expected
+    ending for a link that is already dead, not a failure to report.
+    """
+    transport = Transport(host="stub.invalid", port=0, use_ssl=False)
+
+    class BrokenStream:
+        async def aclose(self) -> None:
+            raise anyio.BrokenResourceError
+
+    transport._stream = BrokenStream()  # type: ignore[assignment]  # noqa: SLF001 - no public seam for a broken stream
+
+    await transport.close()
+
+    assert transport.is_connected is False
+
+
+@pytest.mark.usefixtures("echoing_trader")
+async def test_reconnection_survives_a_transport_that_cannot_be_closed(
+    make_graph: Callable[..., ClientGraph],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    """Failing to tear down the dead link must not abandon the reconnection.
+
+    Regression guard: closing the old transport is the first thing a
+    reconnection does, and on an already-broken socket that close can raise.
+    The exception used to be indistinguishable from an exhausted retry loop, so
+    the client stopped reconnecting permanently — while never having attempted
+    a single reconnection on that cycle.
+    """
+    graph = make_graph()
+    close_cleanly = graph.transport.close
+    refusals = [anyio.BrokenResourceError()]
+
+    async def close_raising_once() -> None:
+        # Raise *after* the real teardown, the way the broken socket did: the
+        # stream is released first, and only the graceful TLS shutdown fails.
+        await close_cleanly()
+        if refusals:
+            raise refusals.pop()
+
+    graph.transport.close = close_raising_once  # type: ignore[method-assign]
+    client = await connected(CTraderClient.from_graph(graph))
+
+    await server.drop_connection()
+    await server.wait_for_connections(2)
+
+    response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=10), ProtoOATraderRes)
+
+    assert response.ctid_trader_account_id == 10
+
+
+@pytest.mark.usefixtures("echoing_trader")
+async def test_a_drop_reported_while_reconnecting_is_not_lost(
+    make_graph: Callable[..., ClientGraph],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    """A drop reported mid-reconnection is acted on, not silently swallowed.
+
+    This is the only window in which nothing else can pick the report up: a
+    detector is refused while a reconnection is in flight, and the reader loop
+    exits as soon as it has reported, so the reconnection already running has to
+    go round again on its behalf. The report is made from a listener, which runs
+    inside that window by construction, and the link is left healthy so that no
+    *other* detector can mask the loss by noticing independently.
+    """
+    graph = make_graph()
+
+    class ReportsADropWhileTheReconnectionIsInFlight:
+        def __init__(self) -> None:
+            self.reported = False
+
+        async def on_connection_lost(self) -> None: ...
+
+        async def on_connection_restored(self) -> None:
+            if self.reported:
+                return
+            self.reported = True
+            await graph.protocol.handle_disconnect()
+
+    graph.supervisor.add_listener(ReportsADropWhileTheReconnectionIsInFlight())
+    client = await connected(CTraderClient.from_graph(graph))
+
+    await server.drop_connection()
+    await server.wait_for_connections(3)
+
+    response = await client.protocol.request(ProtoOATraderReq(ctid_trader_account_id=12), ProtoOATraderRes)
+
+    assert response.ctid_trader_account_id == 12
 
 
 @pytest.mark.usefixtures("echoing_trader")

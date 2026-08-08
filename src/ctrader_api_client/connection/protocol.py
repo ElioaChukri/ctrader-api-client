@@ -109,6 +109,11 @@ class Protocol:
         # reader loop and the heartbeat loop both detecting the same drop).
         self._reconnecting = False
 
+        # Set when the link drops again while a reconnection is already in
+        # flight. The detector that saw it cannot start its own reconnection,
+        # so the one already running goes round again on its behalf.
+        self._redo_requested = False
+
         # Told about link transitions; set by whoever owns this protocol.
         self._listener: ConnectionListener | None = None
 
@@ -444,11 +449,17 @@ class Protocol:
         standalone task decouples the reconnection from the cancel scope of
         whichever loop detected the drop.
 
-        Idempotent: calls made while a reconnection is already in flight are
-        ignored, so the reader and heartbeat loops racing to report the same
-        drop only produce a single reconnection.
+        Idempotent: calls made while a reconnection is already in flight do not
+        start a second one, so the reader and heartbeat loops racing to report
+        the same drop only produce a single reconnection. Such a call is still
+        recorded, because it may be reporting a *fresh* drop of the link the
+        running reconnection just restored — and the caller cannot retry for
+        itself, since the reader loop exits as soon as it has reported.
         """
-        if not self._running or self._reconnecting:
+        if not self._running:
+            return
+        if self._reconnecting:
+            self._redo_requested = True
             return
         if self._task_group is None:
             return
@@ -457,15 +468,24 @@ class Protocol:
         logger.warning("Connection lost, attempting to reconnect...")
 
         # State tied to the dead link is invalid from this moment on. Report it
-        # before reconnecting so nothing observes a session that no longer
-        # exists, and never let a failing listener block the reconnection.
-        if self._listener is not None:
-            try:
-                await self._listener.on_connection_lost()
-            except Exception:
-                logger.exception("Connection listener failed on disconnect")
+        # before reconnecting so nothing observes a session that no longer exists.
+        await self._notify_connection_lost()
 
         self._task_group.start_soon(self._reconnect_task)
+
+    async def _notify_connection_lost(self) -> None:
+        """Tell the listener the link is gone.
+
+        Never lets a failing listener block the reconnection: whatever
+        bookkeeping it does matters less than getting the link back.
+        """
+        if self._listener is None:
+            return
+
+        try:
+            await self._listener.on_connection_lost()
+        except Exception:
+            logger.exception("Connection listener failed on disconnect")
 
     async def _reconnect_task(self) -> None:
         """Own the full reconnection lifecycle from a standalone task.
@@ -475,20 +495,44 @@ class Protocol:
         escape: an unhandled error here would propagate into the protocol task
         group and tear down every other task. A terminal reconnection failure is
         instead recorded by stopping the protocol and waking pending requests.
+
+        Loops rather than running once, so a link that drops again while this is
+        working — reported through `handle_disconnect` as `_redo_requested`, the
+        only route left once the reader has exited — is reconnected too instead
+        of being stranded.
         """
         try:
-            # The reader loop is reading a dead stream; cancel it before we
-            # reconnect so a stale reader can't race the fresh one we restart.
-            if self._reader_scope is not None:
-                self._reader_scope.cancel()
-                self._reader_scope = None
+            while True:
+                self._redo_requested = False
 
-            # Close the old transport (idempotent — the task that detected the
-            # drop may have already raced us to it).
-            await self._transport.close()
+                # The reader loop is reading a dead stream; cancel it before we
+                # reconnect so a stale reader can't race the fresh one we restart.
+                if self._reader_scope is not None:
+                    self._reader_scope.cancel()
+                    self._reader_scope = None
 
-            await self._reconnect()
-            logger.info("Reconnection successful")
+                # Close the old transport (idempotent — the task that detected
+                # the drop may have already raced us to it). Tearing down a dead
+                # socket can fail on its own, which says nothing about whether
+                # reconnecting will work: swallow it here so it can never be
+                # mistaken below for an exhausted reconnection.
+                try:
+                    await self._transport.close()
+                except Exception:
+                    logger.debug("Ignoring error while closing dead transport", exc_info=True)
+
+                await self._reconnect()
+                logger.info("Reconnection successful")
+
+                if not self._redo_requested:
+                    break
+
+                logger.warning("Connection lost again while reconnecting, retrying...")
+                # The sessions this pass just restored died with the link that
+                # dropped underneath it, so report that loss before going round
+                # again — nothing else will, since `handle_disconnect` only
+                # recorded the drop rather than handling it.
+                await self._notify_connection_lost()
         except (CTraderConnectionFailedError, CTraderConnectionClosedError) as e:
             logger.error("Reconnection failed, giving up: %s", e)
             self._running = False
@@ -501,6 +545,7 @@ class Protocol:
             self._fail_pending("Reconnection error")
         finally:
             self._reconnecting = False
+            self._redo_requested = False
 
     def _fail_pending(self, reason: str) -> None:
         """Resolve every in-flight request with a connection error."""

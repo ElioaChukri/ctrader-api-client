@@ -104,7 +104,7 @@ class Transport:
                     await stream.aclose()
                 if close_scope.cancelled_caught:
                     logger.debug("Graceful TLS shutdown timed out, forcing close")
-            except (OSError, anyio.ClosedResourceError):
+            except (OSError, anyio.ClosedResourceError, anyio.BrokenResourceError):
                 pass
 
     async def send(self, data: bytes) -> None:

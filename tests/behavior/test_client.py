@@ -16,7 +16,7 @@ from ctrader_api_client._internal.proto import (
     ProtoOARefreshTokenReq,
     ProtoOATraderReq,
 )
-from ctrader_api_client.auth import AccountCredentials
+from ctrader_api_client.auth import AccountCredentials, ReauthPolicy
 from ctrader_api_client.events import (
     AccountDisconnectEvent,
     ReadyEvent,
@@ -35,6 +35,12 @@ from ..harness import FakeServer, ManualClock, Recorder, factories
 
 ALMOST_EXPIRED = 10.0
 CHECK_INTERVAL = 60.0
+RETRY_WAIT = 1.0
+
+# The heartbeat loop and the token-refresh loop, both parked on the clock once a
+# client is up. Captured rather than assumed where a test needs to tell a new
+# sleeper apart from these.
+SLEEPERS_WHEN_CONNECTED = 2
 
 
 async def authenticate(client: CTraderClient, server: FakeServer) -> AccountCredentials:
@@ -49,6 +55,20 @@ async def authenticate(client: CTraderClient, server: FakeServer) -> AccountCred
 def rejecting(_request: betterproto.Message) -> betterproto.Message:
     """Reject whatever is asked."""
     return factories.error_res(error_code="ACCOUNT_NOT_AUTHORIZED")
+
+
+def cannot_route_once() -> Callable[[betterproto.Message], betterproto.Message]:
+    """Refuse the first request the way a gateway refuses to route one, then relent.
+
+    `CANT_ROUTE_REQUEST` is transient and server-side: the same request a moment
+    later is routed normally.
+    """
+    refusals = [factories.error_res(error_code="CANT_ROUTE_REQUEST", description="Cannot route request")]
+
+    def respond(_request: betterproto.Message) -> betterproto.Message:
+        return refusals.pop() if refusals else factories.app_auth_res()
+
+    return respond
 
 
 def already_logged_in(_request: betterproto.Message) -> betterproto.Message:
@@ -350,6 +370,63 @@ async def test_a_reconnect_that_cannot_re_authenticate_the_app_says_so(
     assert reconnects.only.app_auth_restored is False
     assert reconnects.only.restored_accounts == ()
     assert reconnects.only.failed_accounts == ()
+
+
+async def test_a_reconnect_keeps_retrying_application_authentication(
+    make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+) -> None:
+    """A transient refusal must not cost the client the rest of its session.
+
+    Regression guard: application re-authentication used to be attempted exactly
+    once per reconnect. A single transient refusal left the link up but
+    unauthenticated, with no path back — every later request timed out, and
+    because the link itself was healthy nothing ever reconnected again.
+    """
+    client = await connected(make_client(reauth_policy=ReauthPolicy(min_wait=0.0, max_wait=0.0)))
+    await authenticate(client, server)
+    ready: Recorder[ReadyEvent] = Recorder()
+    client.register_handler(ReadyEvent, ready)
+    server.on(ProtoOAApplicationAuthReq, cannot_route_once())
+
+    await server.drop_connection()
+    await ready.wait_for(1)
+
+    assert client.is_account_authorized(factories.ACCOUNT_ID) is True
+    assert ready.only.account_id == factories.ACCOUNT_ID
+    assert ready.only.is_reconnect is True
+
+
+async def test_retrying_application_authentication_waits_out_its_backoff(
+    make_client: Callable[..., CTraderClient],
+    connected: Callable[[CTraderClient], Awaitable[CTraderClient]],
+    server: FakeServer,
+    clock: ManualClock,
+) -> None:
+    """Retrying is paced by the policy, not spun as fast as the server refuses.
+
+    A server that keeps refusing is usually one under strain; hammering it as
+    fast as the loop can go would pin a core and make that worse.
+    """
+    client = await connected(make_client(reauth_policy=ReauthPolicy(min_wait=RETRY_WAIT, max_wait=RETRY_WAIT)))
+    await authenticate(client, server)
+    await clock.wait_for_sleepers(SLEEPERS_WHEN_CONNECTED)
+    parked = clock.sleeper_count
+    server.on(ProtoOAApplicationAuthReq, rejecting)
+
+    await server.drop_connection()
+    # The attempt the reconnection itself makes, which the server refuses.
+    await server.wait_for_request(ProtoOAApplicationAuthReq, 2)
+    # Recovery has taken it over and is parked on the backoff before retrying.
+    await clock.wait_for_sleepers(parked + 1)
+
+    assert len(server.requests_of(ProtoOAApplicationAuthReq)) == 2
+
+    await clock.advance(RETRY_WAIT)
+    await server.wait_for_request(ProtoOAApplicationAuthReq, 3)
+
+    assert len(server.requests_of(ProtoOAApplicationAuthReq)) == 3
 
 
 async def test_an_account_a_reconnect_could_not_restore_is_not_authorized(

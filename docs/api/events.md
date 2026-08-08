@@ -146,6 +146,14 @@ async def on_reconnected(event: ReconnectedEvent):
         print(f"Failed accounts: {event.failed_accounts}")
 ```
 
+An `app_auth_restored=False` is not the end of the story. The server can refuse
+application authentication for transient reasons of its own, so the client keeps
+retrying with backoff and announces each account it restores afterwards with a
+`ReadyEvent`. Treat this event as a signal that the link is back but degraded —
+stop acting on the session until the accounts are announced ready — rather than
+as a permanent failure. Check the current state with
+`client.auth.is_app_authenticated`.
+
 ::: ctrader_api_client.events.ClientDisconnectEvent
     options:
       show_source: false

@@ -324,8 +324,14 @@ class ReconnectedEvent:
     Use this event for any custom logic that depends on reconnection, such as logging or alerting.
 
     Attributes:
-        app_auth_restored: Whether app authentication succeeded.
+        app_auth_restored: Whether app authentication succeeded on the attempt
+            this event reports. False is not final: the client keeps retrying
+            with backoff, and announces each account it restores afterwards with
+            a ReadyEvent. Check `client.auth.is_app_authenticated` for the
+            state now.
         restored_accounts: Account IDs that were successfully re-authenticated.
+            Empty when app authentication failed, since nothing can be
+            authorized before it succeeds — not a report that they were lost.
         failed_accounts: Accounts that failed, as (account_id, error_message) tuples.
     """
 

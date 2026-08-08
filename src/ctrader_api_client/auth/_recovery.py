@@ -60,6 +60,14 @@ class SessionRecovery:
         # repeated report does not start a second check against the server.
         self._verifying: set[int] = set()
 
+        # A reconnect whose application re-authentication failed, left for the
+        # recovery loop to keep retrying. Nothing can be authorized on a link
+        # the application itself is not authenticated on, so this is settled
+        # before any account is attempted.
+        self._app_auth_pending = False
+        self._app_auth_attempts = 0
+        self._app_auth_next_at = 0.0
+
         self._task_scope: anyio.CancelScope | None = None
         self._running = False
 
@@ -85,6 +93,7 @@ class SessionRecovery:
         finally:
             self._running = False
             self._task_scope = None
+            self._app_auth_pending = False
             self._store.invalidate_all()
             logger.debug("Session recovery monitor stopped")
 
@@ -181,6 +190,11 @@ class SessionRecovery:
         credentials are kept, so the sessions can be re-established once the
         link is back.
         """
+        # Any application re-authentication still being retried belonged to the
+        # link that just died. The reconnection attempts it again from scratch
+        # and re-arms this if it has to, so carrying the old state forward would
+        # only make the next backoff start deeper than it should.
+        self._app_auth_pending = False
         self._store.invalidate_all()
 
     async def on_connection_restored(self) -> None:
@@ -190,6 +204,11 @@ class SessionRecovery:
         link is already back, and a caller can only act on a failure it is told
         about. Without application authentication nothing else can be
         attempted, so that failure is reported on its own.
+
+        Only the first attempt is made here. This runs inside the protocol's
+        reconnection task, which cannot detect a further drop while it is
+        blocked, so a failure is handed to the recovery loop to keep retrying in
+        the background rather than waited out inline.
         """
         logger.debug("Connection restored, re-authenticating...")
 
@@ -197,7 +216,8 @@ class SessionRecovery:
             await self._authenticator.authenticate_app()
             logger.debug("App re-authenticated successfully")
         except Exception as e:
-            logger.error("Failed to re-authenticate app after reconnect: %s", e)
+            logger.error("Failed to re-authenticate app after reconnect, will retry: %s", e)
+            self._arm_app_auth_recovery()
             await self._publisher.emit(
                 ReconnectedEvent(
                     app_auth_restored=False,
@@ -228,14 +248,65 @@ class SessionRecovery:
             )
         )
 
+    def _backoff_delay(self, attempts: int) -> float:
+        """How long to wait before attempt number `attempts`, per the policy."""
+        return min(self._policy.min_wait * 2 ** (attempts - 1), self._policy.max_wait)
+
     def _defer_recovery(self, account_id: int, state: AwaitingRecovery) -> None:
         """Back off before the next recovery attempt for a single account."""
         attempts = state.attempts + 1
-        delay = min(self._policy.min_wait * 2 ** (attempts - 1), self._policy.max_wait)
         self._store.reschedule_recovery(
             account_id,
-            AwaitingRecovery(attempts=attempts, next_attempt_at=self._clock.now() + delay),
+            AwaitingRecovery(
+                attempts=attempts,
+                next_attempt_at=self._clock.now() + self._backoff_delay(attempts),
+            ),
         )
+
+    def _arm_app_auth_recovery(self) -> None:
+        """Hand a failed application re-authentication to the recovery loop.
+
+        Every account is flagged alongside it: their sessions died with the
+        link, and the re-authentication that would have restored them is the
+        very thing that failed, so they are recovered by the same loop once the
+        application is authenticated again.
+        """
+        self._app_auth_pending = True
+        self._app_auth_attempts = 0
+        self._defer_app_auth()
+
+        for credentials in self._store.all_credentials():
+            self._store.flag_for_recovery(credentials.account_id)
+
+        self._reauth_signal.set()
+
+    def _defer_app_auth(self) -> None:
+        """Back off before the next application re-authentication attempt."""
+        self._app_auth_attempts += 1
+        self._app_auth_next_at = self._clock.now() + self._backoff_delay(self._app_auth_attempts)
+
+    async def _retry_app_auth(self) -> bool:
+        """Attempt the deferred application re-authentication once.
+
+        Returns:
+            True if the application is authenticated again, False if the
+            attempt failed and has been deferred for another try.
+        """
+        try:
+            await self._authenticator.authenticate_app()
+        except Exception as e:
+            self._defer_app_auth()
+            logger.warning(
+                "Re-authenticating the application failed (attempt %d), will retry: %s",
+                self._app_auth_attempts,
+                e,
+            )
+            return False
+
+        self._app_auth_pending = False
+        self._app_auth_attempts = 0
+        logger.info("Application re-authenticated; restoring accounts")
+        return True
 
     async def _wait_for_retry(self, delay: float, flagged: anyio.Event) -> None:
         """Wait out a backoff, returning early if another account needs recovery.
@@ -266,6 +337,11 @@ class SessionRecovery:
         and retries continue until every account succeeds, is removed, or the
         monitor stops. A successful re-auth restores authorized state and emits
         a ReadyEvent so subscriptions can be restored.
+
+        Also carries the application re-authentication a reconnect could not
+        complete. That one is not per-account and blocks every account behind
+        it, so it is settled first and the accounts are left flagged until it
+        succeeds.
         """
         while self._running:
             # Consume any pending notification before reading the queue, so a
@@ -273,6 +349,16 @@ class SessionRecovery:
             if self._reauth_signal.is_set():
                 self._reauth_signal = anyio.Event()
             flagged = self._reauth_signal
+
+            if self._app_auth_pending:
+                waiting = self._app_auth_next_at - self._clock.now()
+                if waiting > 0:
+                    await self._wait_for_retry(waiting, flagged)
+                    continue
+                if not await self._retry_app_auth():
+                    continue
+                # Authenticating the application is exactly what the flagged
+                # accounts were held up by, so go straight on to them.
 
             queue = self._store.awaiting_recovery()
             if not queue:
